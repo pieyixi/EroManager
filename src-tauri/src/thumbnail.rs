@@ -217,7 +217,7 @@ struct ThumbnailWorker {
 }
 
 impl ThumbnailWorker {
-    fn start() -> Self {
+    fn start() -> Result<Self, String> {
         let (sender, receiver) = mpsc::channel::<ThumbnailWorkerMessage>();
         std::thread::Builder::new()
             .name("timeline-thumbnail-decoder".to_string())
@@ -251,10 +251,10 @@ impl ThumbnailWorker {
                                     }
                                 }
                             } else {
-                                decoder
-                                    .as_mut()
-                                    .expect("matching decoder must exist")
-                                    .frame_at(request.time, request.exact)
+                                decoder.as_mut().map_or_else(
+                                    || Err("缩略图解码器状态异常".to_string()),
+                                    |decoder| decoder.frame_at(request.time, request.exact),
+                                )
                             };
                             let _ = request.response.send(result);
                         }
@@ -271,8 +271,8 @@ impl ThumbnailWorker {
                     }
                 }
             })
-            .expect("failed to start timeline thumbnail decoder");
-        Self { sender }
+            .map_err(|e| format!("启动缩略图解码线程失败: {}", e))?;
+        Ok(Self { sender })
     }
 
     fn request(
@@ -311,9 +311,18 @@ impl ThumbnailWorker {
     }
 }
 
-static INTERACTIVE_THUMBNAIL_WORKER: OnceLock<ThumbnailWorker> = OnceLock::new();
-static PREFETCH_THUMBNAIL_WORKER: OnceLock<ThumbnailWorker> = OnceLock::new();
+static INTERACTIVE_THUMBNAIL_WORKER: OnceLock<Result<ThumbnailWorker, String>> = OnceLock::new();
+static PREFETCH_THUMBNAIL_WORKER: OnceLock<Result<ThumbnailWorker, String>> = OnceLock::new();
 static PREFETCH_BATCH_LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+
+fn thumbnail_worker(
+    worker: &'static OnceLock<Result<ThumbnailWorker, String>>,
+) -> Result<&'static ThumbnailWorker, String> {
+    worker
+        .get_or_init(ThumbnailWorker::start)
+        .as_ref()
+        .map_err(Clone::clone)
+}
 
 #[derive(serde::Serialize)]
 struct TimelineThumbnailFrame {
@@ -329,14 +338,12 @@ async fn get_video_thumbnail(
     generation: u64,
 ) -> Result<CapturedFrameData, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let image_data = INTERACTIVE_THUMBNAIL_WORKER
-            .get_or_init(ThumbnailWorker::start)
-            .request(
-                ThumbnailPathBuf::from(video_path),
-                time,
-                exact.unwrap_or(false),
-                generation,
-            )?;
+        let image_data = thumbnail_worker(&INTERACTIVE_THUMBNAIL_WORKER)?.request(
+            ThumbnailPathBuf::from(video_path),
+            time,
+            exact.unwrap_or(false),
+            generation,
+        )?;
         Ok(CapturedFrameData { image_data })
     })
     .await
@@ -362,7 +369,7 @@ async fn prefetch_video_thumbnails(
             .get_or_init(|| std::sync::Mutex::new(()))
             .lock()
             .map_err(|e| e.to_string())?;
-        let worker = PREFETCH_THUMBNAIL_WORKER.get_or_init(ThumbnailWorker::start);
+        let worker = thumbnail_worker(&PREFETCH_THUMBNAIL_WORKER)?;
         let path = ThumbnailPathBuf::from(video_path);
         let mut frames = Vec::with_capacity(times.len());
         for time in times.into_iter().take(24) {
@@ -384,13 +391,23 @@ async fn release_video_thumbnail_decoders(generation: u64) -> Result<(), String>
     tauri::async_runtime::spawn_blocking(move || {
         let mut errors = Vec::new();
         if let Some(worker) = INTERACTIVE_THUMBNAIL_WORKER.get() {
-            if let Err(error) = worker.release(generation) {
-                errors.push(error);
+            match worker {
+                Ok(worker) => {
+                    if let Err(error) = worker.release(generation) {
+                        errors.push(error);
+                    }
+                }
+                Err(error) => errors.push(error.clone()),
             }
         }
         if let Some(worker) = PREFETCH_THUMBNAIL_WORKER.get() {
-            if let Err(error) = worker.release(generation) {
-                errors.push(error);
+            match worker {
+                Ok(worker) => {
+                    if let Err(error) = worker.release(generation) {
+                        errors.push(error);
+                    }
+                }
+                Err(error) => errors.push(error.clone()),
             }
         }
         if errors.is_empty() {
@@ -436,7 +453,7 @@ mod thumbnail_tests {
 
     #[test]
     fn released_worker_rejects_stale_requests_before_opening_a_file() {
-        let worker = ThumbnailWorker::start();
+        let worker = ThumbnailWorker::start().unwrap();
         worker.release(7).unwrap();
 
         let error = worker
@@ -461,9 +478,7 @@ mod thumbnail_tests {
         assert!(first.starts_with("data:image/jpeg;base64,"));
         assert!(first.len() > 1_000);
         assert_eq!(jpeg_dimensions(&first), Some((160, 90)));
-        let started = Instant::now();
         let second = decoder.frame_at(120.0, false).unwrap();
-        println!("warm thumbnail latency: {:?}", started.elapsed());
         assert!(second.starts_with("data:image/jpeg;base64,"));
         assert!(second.len() > 1_000);
         assert_ne!(first, second);

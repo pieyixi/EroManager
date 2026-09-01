@@ -54,7 +54,13 @@ fn archive_missing_reasons(dir_path: &str) -> Vec<String> {
         if !has_any_image(&data_dir, "cover") {
             reasons.push("缺少主封面".to_string());
         }
-        let (video_count, _) = folder_video_stats(dir_path);
+        let video_count = match folder_video_stats(dir_path) {
+            Ok((count, _)) => count,
+            Err(error) => {
+                reasons.push(error);
+                0
+            }
+        };
         for i in 1..=video_count {
             if !has_any_image(&data_dir, &format!("cover_ep{}", i)) {
                 reasons.push(format!("缺少第{}集封面", i));
@@ -103,7 +109,13 @@ fn archive_missing_reasons(dir_path: &str) -> Vec<String> {
         reasons.push("缺少主封面".to_string());
     }
 
-    let (video_count, _) = folder_video_stats(dir_path);
+    let video_count = match folder_video_stats(dir_path) {
+        Ok((count, _)) => count,
+        Err(error) => {
+            reasons.push(error);
+            0
+        }
+    };
     let episodes = json.get("episode_list").and_then(|v| v.as_array());
     if episodes.map(|e| e.len()).unwrap_or(0) != video_count as usize {
         reasons.push("集数列表与视频数量不一致".to_string());
@@ -157,9 +169,7 @@ fn decode_data_url(input: &str) -> Vec<u8> {
 fn base64_decode(input: &str) -> Vec<u8> {
     let input = input
         .trim()
-        .replace('\n', "")
-        .replace('\r', "")
-        .replace(' ', "");
+        .replace(['\n', '\r', ' '], "");
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD
         .decode(&input)
@@ -662,7 +672,13 @@ fn validate_archive_meta_json(json: &serde_json::Value, dir_path: &str) -> Vec<S
         reasons.push("episodes 必须等于 episode_list 数量".to_string());
     }
 
-    let (video_count, _) = folder_video_stats(dir_path);
+    let video_count = match folder_video_stats(dir_path) {
+        Ok((count, _)) => count,
+        Err(error) => {
+            reasons.push(error);
+            0
+        }
+    };
     if let Err(err) = collect_numbered_video_paths(std::path::Path::new(dir_path)) {
         reasons.push(err);
     }

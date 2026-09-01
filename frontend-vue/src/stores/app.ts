@@ -67,7 +67,6 @@ export interface ArchiveDraft {
 export const useAppStore = defineStore('app', {
   state: () => ({
     unarchivedScrollTop: 0,
-    unarchivedActiveIndex: '',
     unarchivedFocusPath: '',
     unarchivedFocusOffset: 0,
     mediaLibrary: null as unknown,

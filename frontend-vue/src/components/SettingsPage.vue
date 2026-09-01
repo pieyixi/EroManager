@@ -1,149 +1,142 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useArchiveStore } from '../stores/archive';
 import { useAppStore } from '../stores/app';
 import { useNavigationStore } from '../stores/navigation';
-import { type ConsoleItem, type LibraryScan, isMissingDirectoryItem, useSettingsStore } from '../stores/settings';
+import { type ConsoleItem, type LibraryScan, formatLibrarySize, isMissingDirectoryItem, useSettingsStore } from '../stores/settings';
 
 const app = useAppStore();
 const settings = useSettingsStore();
 const archive = useArchiveStore();
 const navigation = useNavigationStore();
+const cookieModalVisible = ref(false);
+const activeDrawer = ref<'media' | 'eh' | 'duplicates' | null>(null);
 
 type ScanGroupKey = keyof Pick<LibraryScan, 'changed_works' | 'new_episode_works' | 'new_complete_works' | 'attention_works'>;
 
-const groups: Array<{ key: ScanGroupKey; title: string; order: number }> = [
-  { key: 'changed_works', title: '已建档内容有变化', order: 1 },
-  { key: 'new_episode_works', title: '发现新增集数', order: 2 },
-  { key: 'new_complete_works', title: '可导入的新作品', order: 3 },
-  { key: 'attention_works', title: '需要检查', order: 4 },
+const groups: Array<{ key: ScanGroupKey; title: string }> = [
+  { key: 'changed_works', title: '已建档内容有变化' },
+  { key: 'new_episode_works', title: '发现新增集数' },
+  { key: 'new_complete_works', title: '可导入的新作品' },
+  { key: 'attention_works', title: '需要检查' },
 ];
 
 const connected = computed(() => !(app.mediaLibrary as { needs_binding?: boolean } | null)?.needs_binding);
-const ringStyle = computed(() => ({ '--archive-angle': `${settings.archivePercent * 3.6}deg` }));
+const ehConnected = computed(() => Boolean(settings.ehLibraryPath.trim()));
+const mediaIssueCount = computed(() => groups.reduce((total, group) => total + settings.items(group.key).length, 0));
+const ehIssueCount = computed(() => settings.ehScanErrors.length);
+const mediaStatus = computed(() => {
+  if (settings.scanning) return settings.progressText || '正在扫描媒体库';
+  if (mediaIssueCount.value) return `发现 ${mediaIssueCount.value} 项变化`;
+  if (settings.scan) return '上次扫描完成，未发现变化';
+  return '尚未扫描';
+});
+const ehStatus = computed(() => {
+  if (settings.ehScanning) return settings.ehProgressText || '正在扫描 Eh 库';
+  if (ehIssueCount.value) return `发现 ${ehIssueCount.value} 项需要检查`;
+  if (settings.ehScanCompleted) return '上次扫描完成，未发现问题';
+  return '尚未扫描';
+});
+const archiveRingStyle = computed(() => ({ '--archive-angle': `${settings.archivePercent * 3.6}deg` }));
 const ratioStyle = computed(() => ({ width: `${settings.archivePercent}%` }));
+const ehCategoryColors = ['#5f7fca', '#cf718d', '#579887', '#c7924d', '#7f74ad', '#74808c', '#5595a3', '#ba7464', '#81975f', '#9f7395'];
+const ehRingStyle = computed(() => {
+  const total = settings.ehDashboard.total_count || 1;
+  let start = 0;
+  const stops = settings.ehDashboard.categories.map((item, index) => {
+    const end = start + item.count / total * 360;
+    const stop = `${ehCategoryColors[index % ehCategoryColors.length]} ${start}deg ${end}deg`;
+    start = end;
+    return stop;
+  });
+  return { background: stops.length ? `conic-gradient(${stops.join(',')})` : 'var(--track)' };
+});
+const drawerTitle = computed(() => ({ media: '媒体库扫描结果', eh: 'Eh 库扫描结果', duplicates: '重复作品检查' }[activeDrawer.value || 'media']));
 
-function openUnarchived(): void {
-  void archive.openUnarchivedPage();
-}
-
-function groupItems(key: ScanGroupKey): ConsoleItem[] {
-  return settings.items(key);
-}
-
+function openUnarchived(): void { void archive.openUnarchivedPage(); }
+function groupItems(key: ScanGroupKey): ConsoleItem[] { return settings.items(key); }
 function continueArchive(key: ScanGroupKey, index: number): void {
   const item = settings.items(key)[index];
-  if (!item) return;
-  void archive.openArchiveAssistant(item.folder_path, item.new_episode_numbers?.[0] ?? null);
+  if (item) void archive.openArchiveAssistant(item.folder_path, item.new_episode_numbers?.[0] ?? null);
 }
-
-function duplicateSize(bytes: number): string {
-  return bytes ? `${Math.round(bytes / 1024 / 1024)} MB` : '未知大小';
+function openDrawer(drawer: 'media' | 'eh' | 'duplicates'): void { activeDrawer.value = drawer; }
+function closeDrawer(): void { activeDrawer.value = null; }
+function duplicateSize(bytes: number): string { return bytes ? `${Math.round(bytes / 1024 / 1024)} MB` : '未知大小'; }
+async function saveEhCookies(): Promise<void> {
+  await settings.saveEhSettings();
+  if (settings.ehCredentialsMessage?.kind === 'success') cookieModalVisible.value = false;
 }
+function handleSettingsKeydown(event: KeyboardEvent): void {
+  if (navigation.activePage === 'page-settings' && event.key === 'Escape' && (activeDrawer.value || cookieModalVisible.value)) {
+    closeDrawer();
+    cookieModalVisible.value = false;
+    event.preventDefault();
+  }
+}
+onMounted(() => document.addEventListener('keydown', handleSettingsKeydown));
+onBeforeUnmount(() => document.removeEventListener('keydown', handleSettingsKeydown));
 </script>
 
 <template>
   <div class="page" :class="{ active: navigation.activePage === 'page-settings' }" id="page-settings">
-    <div class="settings">
-      <div class="settings-title">设置</div>
-      <div class="console-shell">
-        <section class="settings-overview" aria-label="媒体库概览">
-          <div class="archive-visual">
-            <div class="archive-ring" id="archiveProgressRing" :style="ringStyle">
-              <div class="archive-ring-inner">
-                <strong id="metricProgress">{{ settings.archivePercent }}%</strong>
-                <span>建档率</span>
-              </div>
+    <div class="settings settings-console">
+      <div class="console-shell settings-shell">
+        <section class="settings-dashboard" aria-label="库概览">
+          <article class="dashboard-library dashboard-media">
+            <header class="dashboard-card-head"><div><i class="dashboard-status-dot" :class="{ warning: !connected }"></i><h2>媒体库</h2><span>{{ connected ? '已连接' : '未连接' }}</span></div><span class="dashboard-path">{{ settings.mediaPath }}</span></header>
+            <div class="dashboard-card-body">
+              <div class="dashboard-ring archive-ring" id="archiveProgressRing" :style="archiveRingStyle"><div class="dashboard-ring-inner archive-ring-inner"><strong id="metricProgress">{{ settings.archivePercent }}%</strong><span>建档率</span></div></div>
+              <div class="dashboard-main-number"><strong id="metricTotalWorks">{{ settings.totalWorks }}</strong><span>部作品</span><div class="dashboard-ratio-track"><i id="archiveRatioBar" :style="ratioStyle"></i></div></div>
+              <div class="dashboard-facts"><div><span>已建档</span><strong id="metricArchived">{{ settings.archivedCount }}</strong></div><button @click="openUnarchived"><span>未建档</span><strong id="metricUnarchived">{{ settings.unarchivedCount }}</strong></button><div><span>视频总集数</span><strong id="metricEpisodes">{{ settings.summary.episode_count }}</strong></div><div><span>媒体库容量</span><strong id="metricSize">{{ settings.formattedSize }}</strong></div></div>
             </div>
-            <div class="archive-visual-copy">
-              <span>媒体库</span>
-              <strong><b id="metricTotalWorks">{{ settings.totalWorks }}</b> 部作品</strong>
-              <div class="archive-ratio-track"><span id="archiveRatioBar" :style="ratioStyle"></span></div>
+          </article>
+          <article class="dashboard-library dashboard-eh">
+            <header class="dashboard-card-head"><div><i class="dashboard-status-dot" :class="{ warning: !ehConnected }"></i><h2>Eh 库</h2><span>{{ ehConnected ? '已连接' : '未连接' }}</span></div><span class="dashboard-path">{{ settings.ehLibraryPath || '尚未设置目录' }}</span></header>
+            <div class="dashboard-card-body eh-dashboard-body">
+              <div class="dashboard-ring eh-category-ring" :style="ehRingStyle"><div class="dashboard-ring-inner"><strong>{{ settings.ehDashboard.total_count }}</strong><span>部作品</span></div></div>
+              <div class="eh-category-legend"><div v-for="(item, index) in settings.ehDashboard.categories" :key="item.category" class="eh-category-item"><i :style="{ background: ehCategoryColors[index % ehCategoryColors.length] }"></i><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div></div>
+              <div class="dashboard-facts eh-facts"><div><span>作品数</span><strong>{{ settings.ehDashboard.total_count }}</strong></div><div><span>总容量</span><strong>{{ formatLibrarySize(settings.ehDashboard.total_bytes) }}</strong></div></div>
             </div>
-          </div>
-          <div class="overview-stats">
-            <div class="overview-stat"><span>已建档</span><strong id="metricArchived">{{ settings.archivedCount }}</strong></div>
-            <button class="overview-stat overview-link" @click="openUnarchived"><span>未建档</span><strong id="metricUnarchived">{{ settings.unarchivedCount }}</strong></button>
-            <div class="overview-stat"><span>视频总集数</span><strong id="metricEpisodes">{{ settings.summary.episode_count }}</strong></div>
-            <div class="overview-stat"><span>媒体库容量</span><strong id="metricSize">{{ settings.formattedSize }}</strong></div>
-          </div>
+          </article>
         </section>
 
-        <div class="settings-primary-grid">
-          <section class="console-section console-library">
-            <div class="console-section-head">
-              <h2>媒体库</h2>
-              <button class="btn-primary" id="consoleScanButton" :disabled="settings.busy" @click="settings.scanLibraryChanges">扫描变化</button>
-            </div>
-            <div class="settings-field console-path-row">
-              <input v-model="settings.mediaPath" class="s-input" type="text" id="mediaPath">
-              <button class="btn-secondary" @click="settings.bindMediaLibrary">更改目录</button>
-            </div>
-            <div id="libraryMsg">
-              <div v-if="settings.libraryMessage" class="settings-msg" :class="settings.libraryMessage.kind">{{ settings.libraryMessage.text }}</div>
-              <div v-else-if="connected" class="library-binding-state">媒体库已连接</div>
-            </div>
-            <div class="console-progress" id="consoleProgress" :class="{ active: settings.progressActive }" :aria-hidden="settings.progressActive ? 'false' : 'true'">
-              <div class="console-progress-track"><span id="consoleProgressBar" :style="{ width: `${settings.progressPercent}%` }"></span></div>
-              <span id="consoleProgressText">{{ settings.progressText }}</span>
-            </div>
-            <div class="console-results" id="consoleResults">
-              <div v-if="!settings.scan && !settings.scanning" class="console-empty compact">尚未扫描</div>
-              <div v-else-if="settings.scanning && !settings.scan" class="console-empty">正在读取媒体库...</div>
-              <div v-else-if="settings.scan && !settings.hasScanChanges" class="console-empty compact success"><strong>没有待处理变化</strong></div>
-              <template v-else>
-                <section v-for="group in groups" v-show="groupItems(group.key).length" :key="group.key" class="console-result-group" :style="{ '--result-order': group.order }">
-                  <div class="console-result-head">
-                    <div><h3>{{ group.title }}</h3><span>{{ groupItems(group.key).length }} 项</span></div>
-                    <button v-if="group.key === 'changed_works'" class="btn-primary compact" @click="settings.applyLibraryUpdates">全部更新</button>
-                    <button v-if="group.key === 'new_complete_works'" class="btn-primary compact" @click="settings.importConsoleWorks">导入新作品</button>
-                  </div>
-                  <div class="console-result-list">
-                    <div v-for="(item, index) in groupItems(group.key)" :key="item.folder_path" class="console-result-row">
-                      <div class="console-result-copy">
-                        <strong>{{ item.title }}</strong><span>{{ item.status }}</span>
-                        <div v-if="item.new_episode_numbers?.length" class="console-episode-numbers">{{ item.new_episode_numbers.map(number => `#${number}`).join('、') }}</div>
-                      </div>
-                      <div class="console-row-actions">
-                        <button v-if="group.key === 'new_episode_works'" class="btn-primary compact" @click="continueArchive(group.key, index)">继续建档</button>
-                        <button v-if="group.key === 'attention_works' && isMissingDirectoryItem(item)" class="btn-secondary btn-danger" @click="settings.deleteMissingDatabaseRecord(index)">删除记录</button>
-                        <button v-else class="btn-secondary" @click="settings.openConsoleFolder(group.key, index)">打开文件夹</button>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              </template>
-            </div>
-          </section>
-
-          <section class="console-section data-management">
-            <div class="console-section-head"><h2>数据管理</h2></div>
-            <div class="backup-actions">
-              <button class="btn-secondary" :disabled="settings.busy" @click="settings.backupDatabase">备份数据库</button>
-              <button class="btn-secondary" :disabled="settings.busy" @click="settings.backupDataPackage">备份资料包</button>
-              <button class="btn-secondary" :disabled="settings.busy" @click="settings.restoreDatabase">恢复数据库</button>
-            </div>
-            <input v-model="settings.backupPath" class="s-input console-backup-path" type="text" id="dbFilePath" placeholder="备份或恢复路径，例如 D:\Ark\hanime-data-backup.zip">
-            <div id="dbMsg"><div v-if="settings.databaseMessage" class="settings-msg" :class="settings.databaseMessage.kind">{{ settings.databaseMessage.text }}</div></div>
-            <div class="settings-inline-tool">
-              <span>重复作品检查</span>
-              <button class="btn-secondary" @click="settings.duplicateCheck">开始查重</button>
-            </div>
-            <div id="duplicateMsg">
-              <div v-if="settings.duplicateMessage" class="settings-msg" :class="settings.duplicateMessage.kind">{{ settings.duplicateMessage.text }}</div>
-              <div v-if="settings.duplicates.length" style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
-                <div v-for="(group, groupIndex) in settings.duplicates" :key="groupIndex" class="duplicate-group">
-                  <div class="duplicate-group-title">重复组 {{ groupIndex + 1 }}</div>
-                  <div v-for="item in group.items" :key="item.folder_path" class="duplicate-item">
-                    <div><strong>{{ item.title }}</strong> <span>({{ item.source }} / {{ item.video_count }}集 / {{ duplicateSize(item.total_size) }})</span></div>
-                    <div class="duplicate-path">{{ item.folder_path }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
+        <section class="settings-operation-grid" aria-label="库操作">
+          <article class="settings-control-card library-control-card">
+            <header class="control-card-head"><div><h2>媒体库</h2><span>视频作品目录</span></div><button id="consoleScanButton" class="btn-primary control-primary" :disabled="settings.busy" @click="settings.scanLibraryChanges">{{ settings.scanning ? '扫描中' : '扫描变化' }}</button></header>
+            <div class="control-path-row"><input v-model="settings.mediaPath" class="s-input" type="text" id="mediaPath"><button class="btn-secondary" @click="settings.bindMediaLibrary">更改目录</button></div>
+            <div class="control-card-state" :class="{ actionable: mediaIssueCount }"><span class="state-line"><i :class="{ busy: settings.scanning, warning: mediaIssueCount }"></i>{{ mediaStatus }}</span><button v-if="mediaIssueCount" class="state-action" @click="openDrawer('media')">查看结果 <span>›</span></button></div>
+            <div class="compact-progress" id="consoleProgress" :class="{ active: settings.progressActive }" :aria-hidden="settings.progressActive ? 'false' : 'true'"><div class="compact-progress-track"><span id="consoleProgressBar" :style="{ width: `${settings.progressPercent}%` }"></span></div><span id="consoleProgressText">{{ settings.progressText }}</span></div>
+            <div id="libraryMsg" class="visually-hidden"><span v-if="settings.libraryMessage">{{ settings.libraryMessage.text }}</span></div><div id="consoleResults" class="visually-hidden"></div>
+          </article>
+          <article class="settings-control-card library-control-card">
+            <header class="control-card-head"><div><h2>Eh 库</h2><span>本子作品目录</span></div><button class="btn-primary control-primary" :disabled="settings.ehScanning" @click="settings.scanEhLibrary">{{ settings.ehScanning ? '扫描中' : '扫描变化' }}</button></header>
+            <div class="control-path-row"><input v-model="settings.ehLibraryPath" class="s-input" type="text"><button class="btn-secondary" @click="settings.bindEhLibrary">更改目录</button></div>
+            <div class="control-card-state" :class="{ actionable: ehIssueCount }"><span class="state-line"><i :class="{ busy: settings.ehScanning, warning: ehIssueCount }"></i>{{ ehStatus }}</span><button v-if="ehIssueCount" class="state-action" @click="openDrawer('eh')">查看结果 <span>›</span></button></div>
+            <div class="compact-progress" :class="{ active: settings.ehProgressActive }" :aria-hidden="settings.ehProgressActive ? 'false' : 'true'"><div class="compact-progress-track"><span :style="{ width: `${settings.ehProgressPercent}%` }"></span></div><span>{{ settings.ehProgressText }}</span></div>
+          </article>
+          <article class="settings-maintenance-card">
+            <section class="maintenance-column">
+              <header class="maintenance-head"><div><h2>媒体数据</h2><span>数据库、资料包与重复检查</span></div></header>
+              <div class="maintenance-actions"><button class="maintenance-button" :disabled="settings.busy" @click="settings.backupDatabase">备份数据库</button><button class="maintenance-button" :disabled="settings.busy" @click="settings.restoreDatabase">恢复数据库</button><button class="maintenance-button" :disabled="settings.busy" @click="settings.backupDataPackage">备份资料包</button><button class="maintenance-button" @click="openDrawer('duplicates')">重复检查</button></div>
+              <input v-model="settings.backupPath" class="s-input maintenance-path" type="text" id="dbFilePath" placeholder="备份或恢复路径，例如 D:\Ark\hanime-data-backup.zip"><div id="dbMsg" class="maintenance-message">{{ settings.databaseMessage?.text || '' }}</div><div id="duplicateMsg" class="visually-hidden"></div>
+            </section>
+            <section class="maintenance-column">
+              <header class="maintenance-head"><div><h2>Eh 数据</h2><span>本子索引、资料包与访问凭据</span></div></header>
+              <div class="maintenance-actions"><button class="maintenance-button" @click="settings.backupEhDatabase">备份数据库</button><button class="maintenance-button" @click="settings.restoreEhDatabase">恢复数据库</button><button class="maintenance-button" @click="settings.backupEhDataPackage">备份资料包</button><button class="maintenance-button" @click="cookieModalVisible = true">Cookie 设置</button></div>
+              <input v-model="settings.ehBackupPath" class="s-input maintenance-path" type="text" placeholder="Eh 库备份或恢复路径，例如 D:\Ark\eh-data-backup.zip"><div class="maintenance-message">{{ settings.ehDataMessage?.text || '' }}</div>
+            </section>
+          </article>
+        </section>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div v-if="activeDrawer" class="settings-drawer-layer" @click.self="closeDrawer"><aside class="settings-drawer" role="dialog" aria-modal="true" :aria-label="drawerTitle"><header class="settings-drawer-head"><div><span>设置</span><h2>{{ drawerTitle }}</h2></div><button class="drawer-close" aria-label="关闭" @click="closeDrawer">×</button></header><div class="settings-drawer-body">
+        <template v-if="activeDrawer === 'media'"><section v-for="group in groups" v-show="groupItems(group.key).length" :key="group.key" class="drawer-result-group"><header><h3>{{ group.title }}</h3><span>{{ groupItems(group.key).length }} 项</span><button v-if="group.key === 'changed_works'" class="btn-primary compact" @click="settings.applyLibraryUpdates">全部更新</button><button v-if="group.key === 'new_complete_works'" class="btn-primary compact" @click="settings.importConsoleWorks">导入新作品</button></header><div v-for="(item, index) in groupItems(group.key)" :key="item.folder_path" class="drawer-result-item"><div><strong>{{ item.title }}</strong><span>{{ item.status }}</span><small v-if="item.new_episode_numbers?.length">{{ item.new_episode_numbers.map(number => `#${number}`).join('、') }}</small></div><button v-if="group.key === 'new_episode_works'" class="text-action" @click="continueArchive(group.key, index)">继续建档</button><button v-else-if="group.key === 'attention_works' && isMissingDirectoryItem(item)" class="text-action danger" @click="settings.deleteMissingDatabaseRecord(index)">删除记录</button><button v-else class="text-action" @click="settings.openConsoleFolder(group.key, index)">打开文件夹</button></div></section></template>
+        <template v-else-if="activeDrawer === 'eh'"><div class="drawer-summary"><i class="dashboard-status-dot warning"></i><strong>{{ ehIssueCount }} 项需要检查</strong></div><div v-for="(issue, index) in settings.ehScanErrors" :key="issue.folder_path" class="drawer-result-item"><div><strong>{{ issue.title }}</strong><span>{{ issue.reason }}</span></div><button class="text-action" @click="settings.openEhScanIssue(index)">打开文件夹</button></div></template>
+        <template v-else><div v-if="!settings.duplicates.length" class="drawer-empty">{{ settings.duplicateMessage?.text || '尚未进行重复作品检查' }}</div><div v-for="(group, groupIndex) in settings.duplicates" :key="groupIndex" class="duplicate-group"><div class="duplicate-group-title">重复组 {{ groupIndex + 1 }}</div><div v-for="item in group.items" :key="item.folder_path" class="duplicate-item"><strong>{{ item.title }}</strong><span>{{ item.source }} / {{ item.video_count }} 集 / {{ duplicateSize(item.total_size) }}</span><small>{{ item.folder_path }}</small></div></div></template>
+      </div></aside></div>
+      <div class="modal-mask" :class="{ active: cookieModalVisible }" @click.self="cookieModalVisible = false"><div class="modal eh-cookie-modal" role="dialog" aria-modal="true" aria-label="Eh Cookie 设置"><div class="modal-title">Eh Cookie 设置</div><div class="modal-copy">用于请求作品元数据，仅保存在软件本体旁的 Eh 数据库中。</div><div class="eh-cookie-fields"><label><span>ipb_member_id</span><input v-model="settings.ehMemberId" class="s-input" type="password" autocomplete="off"></label><label><span>ipb_pass_hash</span><input v-model="settings.ehPassHash" class="s-input" type="password" autocomplete="off"></label><label><span>igneous</span><input v-model="settings.ehIgneous" class="s-input" type="password" autocomplete="off"></label></div><div v-if="settings.ehCredentialsMessage" class="settings-msg" :class="settings.ehCredentialsMessage.kind">{{ settings.ehCredentialsMessage.text }}</div><div class="modal-actions"><button class="btn-secondary" @click="cookieModalVisible = false">取消</button><button class="btn-primary" :disabled="settings.ehCredentialsSaving" @click="saveEhCookies">保存</button></div></div></div>
+    </Teleport>
   </div>
 </template>

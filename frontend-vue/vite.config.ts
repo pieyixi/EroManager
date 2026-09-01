@@ -18,6 +18,9 @@ export default defineConfig({
   clearScreen: false,
   server: {
     strictPort: true,
+    fs: {
+      allow: ['..'],
+    },
   },
   build: {
     target: 'es2021',

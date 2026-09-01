@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use rusqlite::OptionalExtension;
 
 fn library_work_dirs(root: &Path) -> Result<Vec<PathBuf>, String> {
     if !root.is_dir() {
@@ -8,7 +9,7 @@ fn library_work_dirs(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut dirs = Vec::new();
     for entry in std::fs::read_dir(root).map_err(|e| e.to_string())? {
         let path = entry.map_err(|e| e.to_string())?.path();
-        if path.is_dir() && folder_has_video(&path) {
+        if path.is_dir() && folder_has_video(&path)? {
             dirs.push(path);
         }
     }
@@ -16,34 +17,45 @@ fn library_work_dirs(root: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(dirs)
 }
 
-fn folder_has_video(path: &Path) -> bool {
-    std::fs::read_dir(path)
-        .ok()
-        .map(|entries| {
-            entries
-                .flatten()
-                .any(|entry| entry.path().is_file() && is_video_file(&entry.path()))
-        })
-        .unwrap_or(false)
+fn folder_has_video(path: &Path) -> Result<bool, String> {
+    let entries = std::fs::read_dir(path)
+        .map_err(|e| format!("读取目录失败 {}: {}", path.display(), e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取目录项失败 {}: {}", path.display(), e))?;
+        let entry_path = entry.path();
+        if entry_path.is_file() && is_video_file(&entry_path) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
-fn directory_size(path: &Path) -> u64 {
+fn directory_size(path: &Path) -> Result<u64, String> {
     let mut total = 0u64;
     let mut pending = vec![path.to_path_buf()];
     while let Some(dir) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                pending.push(path);
-            } else if let Ok(meta) = entry.metadata() {
-                total = total.saturating_add(meta.len());
+        let entries = std::fs::read_dir(&dir)
+            .map_err(|e| format!("读取目录失败 {}: {}", dir.display(), e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("读取目录项失败 {}: {}", dir.display(), e))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|e| format!("读取文件类型失败 {}: {}", entry.path().display(), e))?;
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            } else if file_type.is_file() {
+                total = total.saturating_add(
+                    entry
+                        .metadata()
+                        .map_err(|e| {
+                            format!("读取文件信息失败 {}: {}", entry.path().display(), e)
+                        })?
+                        .len(),
+                );
             }
         }
     }
-    total
+    Ok(total)
 }
 
 fn library_console_summary(conn: &Connection, root: &Path) -> Result<LibraryConsoleSummary, String> {
@@ -62,7 +74,7 @@ fn library_console_summary(conn: &Connection, root: &Path) -> Result<LibraryCons
         archived_count,
         unarchived_count,
         episode_count,
-        total_bytes: directory_size(root),
+        total_bytes: directory_size(root)?,
     })
 }
 
@@ -75,41 +87,42 @@ fn fnv1a(data: &[u8]) -> u64 {
     hash
 }
 
-fn meta_signature(folder: &Path) -> String {
+fn meta_signature(folder: &Path) -> Result<String, String> {
     let path = folder.join("data").join("meta.json");
     std::fs::read(path)
         .map(|data| format!("{:016x}", fnv1a(&data)))
-        .unwrap_or_default()
+        .map_err(|e| format!("meta.json 无法读取: {}", e))
 }
 
-fn cover_signature(folder: &Path) -> String {
+fn cover_signature(folder: &Path) -> Result<String, String> {
     let data_dir = folder.join("data");
     let mut parts = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(data_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            if !path.is_file() || !name.starts_with("cover") {
-                continue;
-            }
-            let Ok(meta) = entry.metadata() else {
-                continue;
-            };
-            let modified = meta
-                .modified()
-                .ok()
-                .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|value| value.as_nanos())
-                .unwrap_or(0);
-            parts.push(format!("{}:{}:{}", name, meta.len(), modified));
+    let entries = std::fs::read_dir(&data_dir)
+        .map_err(|e| format!("读取 data 目录失败 {}: {}", data_dir.display(), e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取 data 目录项失败: {}", e))?;
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if !path.is_file() || !name.starts_with("cover") {
+            continue;
         }
+        let meta = entry
+            .metadata()
+            .map_err(|e| format!("读取封面信息失败 {}: {}", path.display(), e))?;
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|value| value.as_nanos())
+            .unwrap_or(0);
+        parts.push(format!("{}:{}:{}", name, meta.len(), modified));
     }
     parts.sort();
-    format!("{:016x}", fnv1a(parts.join("|").as_bytes()))
+    Ok(format!("{:016x}", fnv1a(parts.join("|").as_bytes())))
 }
 
 fn normalized_video_path(path: &str) -> String {
@@ -143,7 +156,7 @@ fn save_library_snapshot(conn: &Connection, work_id: i64, folder_path: &str) -> 
          ON CONFLICT(WorkId) DO UPDATE SET
            MetaSignature=excluded.MetaSignature,
            CoverSignature=excluded.CoverSignature",
-        params![work_id, meta_signature(folder), cover_signature(folder)],
+        params![work_id, meta_signature(folder)?, cover_signature(folder)?],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -200,8 +213,8 @@ fn semantic_meta_matches_database(
         .map_err(|e| e.to_string())?
         .query_map(params![work_id], |row| Ok((row.get(0)?, row.get(1)?)))
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect();
+        .collect::<Result<Vec<(i32, String)>, _>>()
+        .map_err(|e| e.to_string())?;
     let expected_episodes: Vec<(i32, String)> = episodes
         .iter()
         .enumerate()
@@ -264,8 +277,8 @@ fn semantic_meta_matches_database(
         .map_err(|e| e.to_string())?
         .query_map(params![work_id], |row| row.get(0))
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect();
+        .collect::<Result<HashSet<String>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(db_tags == expected_tags)
 }
 
@@ -310,8 +323,8 @@ fn scan_library_changes(
         .map_err(|e| e.to_string())?
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect();
+        .collect::<Result<Vec<(i64, String, String)>, _>>()
+        .map_err(|e| e.to_string())?;
     let existing_by_path: HashMap<String, (i64, String, String)> = existing
         .iter()
         .cloned()
@@ -373,8 +386,8 @@ fn scan_library_changes(
             .map_err(|e| e.to_string())?
             .query_map(params![work_id], |row| Ok((row.get(0)?, row.get(1)?)))
             .map_err(|e| e.to_string())?
-            .filter_map(Result::ok)
-            .collect();
+            .collect::<Result<HashMap<i32, String>, _>>()
+            .map_err(|e| e.to_string())?;
         let disk_numbers: HashSet<i32> = disk_videos.keys().copied().collect();
         let db_numbers: HashSet<i32> = database_videos.keys().copied().collect();
         let mut new_numbers: Vec<i32> = disk_numbers.difference(&db_numbers).copied().collect();
@@ -430,26 +443,42 @@ fn scan_library_changes(
             continue;
         }
 
-        let current_meta = meta_signature(&dir);
-        if current_meta.is_empty() {
-            result.attention_works.push(console_item(
-                Some(*work_id),
-                db_title.clone(),
-                folder_path,
-                "缺少或无法读取 data/meta.json".to_string(),
-                Vec::new(),
-                false,
-            ));
-            continue;
-        }
-        let current_cover = cover_signature(&dir);
+        let current_meta = match meta_signature(&dir) {
+            Ok(signature) => signature,
+            Err(error) => {
+                result.attention_works.push(console_item(
+                    Some(*work_id),
+                    db_title.clone(),
+                    folder_path,
+                    error,
+                    Vec::new(),
+                    false,
+                ));
+                continue;
+            }
+        };
+        let current_cover = match cover_signature(&dir) {
+            Ok(signature) => signature,
+            Err(error) => {
+                result.attention_works.push(console_item(
+                    Some(*work_id),
+                    db_title.clone(),
+                    folder_path,
+                    error,
+                    Vec::new(),
+                    false,
+                ));
+                continue;
+            }
+        };
         let snapshot = conn
             .query_row(
                 "SELECT MetaSignature, CoverSignature FROM LibrarySnapshots WHERE WorkId=?1",
                 params![work_id],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
-            .ok();
+            .optional()
+            .map_err(|e| e.to_string())?;
         if let Some((old_meta, old_cover)) = snapshot {
             let meta_changed = old_meta != current_meta;
             let cover_changed = old_cover != current_cover;

@@ -37,20 +37,32 @@ function core(): TauriCore | undefined {
   return undefined;
 }
 
+function browserMockEnabled(): boolean {
+  return import.meta.env.DEV && !core();
+}
+
 export function isTauriConnected(): boolean {
-  return Boolean(core());
+  return Boolean(core()) || browserMockEnabled();
 }
 
 export async function invokeTauri<T>(command: string, args?: InvokeArgs): Promise<T> {
   const tauri = core();
-  if (!tauri) throw new Error('Tauri runtime is not connected');
-  return tauri.invoke<T>(command, args);
+  if (tauri) return tauri.invoke<T>(command, args);
+  if (browserMockEnabled()) {
+    const { invokeBrowserMock } = await import('./webMock');
+    return invokeBrowserMock<T>(command, args);
+  }
+  throw new Error('Tauri runtime is not connected');
 }
 
 export async function listenTauri<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
   const listen = window.__TAURI__?.event?.listen;
-  if (!listen) throw new Error('Tauri event runtime is not connected');
-  return listen<T>(event, ({ payload }) => handler(payload));
+  if (listen) return listen<T>(event, ({ payload }) => handler(payload));
+  if (browserMockEnabled()) {
+    const { listenBrowserMock } = await import('./webMock');
+    return listenBrowserMock(event, handler);
+  }
+  throw new Error('Tauri event runtime is not connected');
 }
 
 export function convertFilePath(path: string): string {
@@ -61,4 +73,15 @@ export function convertFilePath(path: string): string {
 
 export function currentTauriWindow(): TauriWindowHandle | null {
   return window.__TAURI__?.window?.getCurrentWindow?.() || null;
+}
+
+export async function pickDirectory(defaultPath?: string): Promise<string | null> {
+  if (browserMockEnabled()) return null;
+  const { open } = await import('@tauri-apps/plugin-dialog');
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    defaultPath: defaultPath || undefined,
+  });
+  return typeof selected === 'string' ? selected : null;
 }

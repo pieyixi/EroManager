@@ -19,9 +19,11 @@ src/
 |-- App.vue                         Application composition and runtime lifetime
 |-- main.ts                         Vue, Pinia, and root mount
 |-- api/
-|   `-- tauri.ts                    Typed Tauri connectivity adapter
+|   |-- tauri.ts                    Runtime-selecting backend adapter
+|   `-- webMock.ts                  Development-only browser contract fixtures
 |-- components/
 |   |-- HomePage.vue                Library grid, filters, sorting, pagination
+|   |-- EhLibraryPage.vue           Local gallery overview and organization states
 |   |-- DetailPage.vue              Metadata and episode rendering
 |   |-- PlayerPage.vue              Reactive playback UI and registered refs
 |   |-- UnarchivedPage.vue          Incomplete-entry list and A-Z navigation
@@ -34,6 +36,7 @@ src/
 |   |-- library.ts                  Works, covers, filters, detail, pagination
 |   |-- archive.ts                  Incomplete folders and authoring workflow
 |   |-- settings.ts                 Binding, scans, imports, updates, backups
+|   |-- ehLibrary.ts                Local gallery browsing and metadata workflow
 |   `-- player.ts                   Playback and timeline-preview state
 |-- features/player/
 |   |-- commands.ts                 Typed command boundary used by pages
@@ -63,6 +66,8 @@ Tauri API / libmpv adapter
         v
 Rust command or plugin
 ```
+
+In browser development, the final two layers are replaced by `webMock.ts`. Components and stores use the same command contract in both modes and must not branch on the runtime. The mock is available only under Vite development mode when no Tauri runtime exists.
 
 Lower layers do not import page components. Stores do not locate DOM elements. Components do not build application markup dynamically.
 

@@ -138,7 +138,6 @@ export const useArchiveStore = defineStore('archive', {
       const returning = navigation.activePage === 'page-archive';
       if (!returning) {
         app.unarchivedScrollTop = 0;
-        app.unarchivedActiveIndex = '';
         app.unarchivedFocusPath = '';
         app.unarchivedFocusOffset = 0;
       }
@@ -167,8 +166,6 @@ export const useArchiveStore = defineStore('archive', {
 
     setActiveIndex(letter: string): void {
       this.activeIndex = letter;
-      const app = useAppStore();
-      app.unarchivedActiveIndex = letter;
     },
 
     async openArchiveAssistant(dirPath = '', focusEpisode?: number | null): Promise<void> {

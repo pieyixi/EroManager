@@ -23,9 +23,9 @@ The application is designed for offline use. It keeps its index beside the execu
 - Vue 3, TypeScript, Pinia, and Vite
 - libmpv
 
-## Version 3.0
+## Version 4.0
 
-Version 3.0 builds on the completed Vue 3 and TypeScript migration with a unified desktop shell, refined filtering, theme transitions, and a more robust native playback surface.
+Version 4.0 extends the local-first catalog with a second image-based library and a dedicated reader while preserving the completed Vue 3 and TypeScript architecture.
 
 - Vue single-file components define the page structure.
 - Pinia stores own shared state and long-running workflows.
@@ -36,6 +36,11 @@ Version 3.0 builds on the completed Vue 3 and TypeScript migration with a unifie
 - A UI contract check protects stable element identifiers and rejects inline HTML event handlers.
 - Shared shell controls keep navigation and window behavior consistent across library, detail, workspace, settings, and playback views.
 - Native playback now preserves monitor placement, maximized state, fullscreen bounds, and media-handle cleanup more reliably.
+- Independent local catalogs share the same navigation, search, filtering, detail, and settings conventions.
+- The image reader supports single- and dual-page layouts, right-to-left navigation, zooming, keyboard controls, and progressive page loading.
+- Embedded metadata localization improves display and search without replacing canonical source values.
+- Visible-page cover loading and request deduplication keep first-page rendering responsive as catalogs grow.
+- Destructive catalog actions distinguish database-only removal from guarded local-folder deletion.
 
 ## Project Layout
 

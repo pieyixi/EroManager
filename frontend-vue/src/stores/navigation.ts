@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 
-export type PageId = 'page-home' | 'page-detail' | 'page-player' | 'page-settings' | 'page-unarchived' | 'page-archive';
-export type ContextMenuMode = 'home' | 'work';
+export type PageId = 'page-home' | 'page-eh-library' | 'page-eh-reader' | 'page-detail' | 'page-player' | 'page-settings' | 'page-unarchived' | 'page-archive';
+export type ContextMenuMode = 'home' | 'work' | 'eh-work';
 
 interface ConfirmationState {
   visible: boolean;
@@ -22,6 +22,7 @@ interface ContextMenuState {
 export const useNavigationStore = defineStore('navigation', {
   state: () => ({
     activePage: 'page-home' as PageId,
+    detailSource: 'media' as 'media' | 'eh',
     confirmation: {
       visible: false,
       title: '',

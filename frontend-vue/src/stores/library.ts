@@ -431,7 +431,9 @@ export const useLibraryStore = defineStore('library', {
         this.currentDetailWorkId = workId;
         this.currentDetail = detail;
         await this.loadCovers([detail.work.cover_path, ...detail.episodes.map((episode) => episode.cover_path)].filter((path): path is string => Boolean(path)));
-        useNavigationStore().showPage('page-detail');
+        const navigation = useNavigationStore();
+        navigation.detailSource = 'media';
+        navigation.showPage('page-detail');
       } catch (error) {
         console.error('show detail failed:', error);
       }

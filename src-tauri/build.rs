@@ -1,4 +1,5 @@
 fn main() {
+    println!("cargo:rerun-if-changed=../frontend-vue/dist");
     copy_libmpv_runtime_libs();
     tauri_build::build();
 }

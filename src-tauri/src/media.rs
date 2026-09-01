@@ -73,8 +73,8 @@ fn get_studios(db: State<Database>) -> Result<Vec<String>, String> {
     let studios = stmt
         .query_map([], |r| r.get(0))
         .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(studios)
 }
 

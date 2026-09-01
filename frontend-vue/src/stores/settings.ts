@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
-import { invokeTauri, listenTauri } from '../api/tauri';
+import { invokeTauri, listenTauri, pickDirectory } from '../api/tauri';
 import { useAppStore } from './app';
 import { useLibraryStore } from './library';
+import { useEhLibraryStore } from './ehLibrary';
 import { useNavigationStore } from './navigation';
 
 export interface MediaLibraryStatus {
@@ -44,6 +45,48 @@ interface BackupProgressEvent {
   text: string;
 }
 
+interface EhScanProgressEvent {
+  percent: number;
+  text: string;
+}
+
+interface EhSettings {
+  root_path: string;
+  ipb_member_id: string;
+  ipb_pass_hash: string;
+  igneous: string;
+}
+
+interface EhScanResult {
+  folders: number;
+  indexed: number;
+  created_meta: number;
+  created_cover: number;
+  removed_records: number;
+  skipped: number;
+  errors: EhScanIssue[];
+}
+
+interface EhScanIssue {
+  title: string;
+  folder_path: string;
+  reason: string;
+}
+
+export interface EhCategoryMetric {
+  category: number;
+  label: string;
+  count: number;
+  bytes: number;
+}
+
+interface EhLibraryDashboard {
+  total_count: number;
+  total_pages: number;
+  total_bytes: number;
+  categories: EhCategoryMetric[];
+}
+
 interface DuplicateItem {
   title: string;
   source: string;
@@ -67,6 +110,24 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function displayWindowsPath(path: string): string {
+  if (path.startsWith('\\\\?\\UNC\\')) return `\\\\${path.slice(8)}`;
+  return path.startsWith('\\\\?\\') ? path.slice(4) : path;
+}
+
+function summarizeEhScanErrors(errors: EhScanIssue[]): string {
+  if (!errors.length) return '';
+  const missingSource = errors.filter((error) => error.reason.includes('.ehviewer')).length;
+  const missingCover = errors.filter((error) => error.reason.includes('无法建立封面')).length;
+  const other = errors.length - missingSource - missingCover;
+  const groups = [
+    missingSource ? `缺少来源信息 ${missingSource}` : '',
+    missingCover ? `缺少封面来源 ${missingCover}` : '',
+    other ? `其他错误 ${other}` : '',
+  ].filter(Boolean);
+  return `失败 ${errors.length} 部（${groups.join('，')}）`;
+}
+
 export function formatLibrarySize(bytes: number): string {
   let value = Number(bytes || 0);
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -81,6 +142,22 @@ export function formatLibrarySize(bytes: number): string {
 export const useSettingsStore = defineStore('settings', {
   state: () => ({
     mediaPath: 'D:\\HAnime',
+    ehLibraryPath: '',
+    ehMemberId: '',
+    ehPassHash: '',
+    ehIgneous: '',
+    ehCredentialsSaving: false,
+    ehCredentialsMessage: null as UiMessage | null,
+    ehLibraryMessage: null as UiMessage | null,
+    ehScanning: false,
+    ehScanCompleted: false,
+    ehScanErrors: [] as EhScanIssue[],
+    ehProgressActive: false,
+    ehProgressPercent: 0,
+    ehProgressText: '',
+    ehBackupPath: '',
+    ehDataMessage: null as UiMessage | null,
+    ehDashboard: { total_count: 0, total_pages: 0, total_bytes: 0, categories: [] } as EhLibraryDashboard,
     backupPath: '',
     libraryMessage: null as UiMessage | null,
     databaseMessage: null as UiMessage | null,
@@ -146,7 +223,57 @@ export const useSettingsStore = defineStore('settings', {
 
     async openSettingsPage(): Promise<void> {
       useNavigationStore().showPage('page-settings');
-      await this.loadSummary();
+      await Promise.all([this.loadSummary(), this.loadEhSettings(), this.loadEhDashboard()]);
+    },
+
+    applyEhSettings(settings: EhSettings): void {
+      if (settings.root_path) this.ehLibraryPath = displayWindowsPath(settings.root_path);
+      this.ehMemberId = settings.ipb_member_id || '';
+      this.ehPassHash = settings.ipb_pass_hash || '';
+      this.ehIgneous = settings.igneous || '';
+    },
+
+    async loadEhSettings(): Promise<void> {
+      try {
+        this.applyEhSettings(await invokeTauri<EhSettings>('eh_get_settings'));
+      } catch (error) {
+        this.ehCredentialsMessage = { kind: 'err', text: `读取 Eh 设置失败：${errorText(error)}` };
+      }
+    },
+
+    async loadEhDashboard(): Promise<void> {
+      try {
+        this.ehDashboard = await invokeTauri<EhLibraryDashboard>('eh_get_library_dashboard');
+      } catch (error) {
+        this.ehLibraryMessage = { kind: 'err', text: `读取 Eh 概览失败：${errorText(error)}` };
+      }
+    },
+
+    async saveEhSettings(): Promise<void> {
+      if (this.ehCredentialsSaving) return;
+      const rootPath = this.ehLibraryPath.trim();
+      if (!rootPath) {
+        this.ehCredentialsMessage = { kind: 'err', text: '请先填写 Eh 库目录' };
+        return;
+      }
+      this.ehCredentialsSaving = true;
+      this.ehCredentialsMessage = { kind: 'info', text: '正在保存...' };
+      try {
+        const saved = await invokeTauri<EhSettings>('eh_save_settings', {
+          input: {
+            rootPath,
+            ipbMemberId: this.ehMemberId.trim(),
+            ipbPassHash: this.ehPassHash.trim(),
+            igneous: this.ehIgneous.trim(),
+          },
+        });
+        this.applyEhSettings(saved);
+        this.ehCredentialsMessage = { kind: 'success', text: 'Eh 目录和访问凭据已保存' };
+      } catch (error) {
+        this.ehCredentialsMessage = { kind: 'err', text: `保存失败：${errorText(error)}` };
+      } finally {
+        this.ehCredentialsSaving = false;
+      }
     },
 
     async bindMediaLibraryPath(path: string, showMessage: boolean): Promise<MediaLibraryStatus> {
@@ -166,7 +293,10 @@ export const useSettingsStore = defineStore('settings', {
     },
 
     async bindMediaLibrary(): Promise<void> {
-      const path = this.mediaPath.trim();
+      const selected = await pickDirectory(this.mediaPath.trim());
+      if (!selected) return;
+      this.mediaPath = selected;
+      const path = selected;
       if (!path) return;
       this.libraryMessage = { kind: 'info', text: '正在验证媒体库...' };
       try {
@@ -177,6 +307,84 @@ export const useSettingsStore = defineStore('settings', {
       } catch (error) {
         this.libraryMessage = { kind: 'err', text: `绑定失败: ${errorText(error)}` };
       }
+    },
+
+    async bindEhLibrary(): Promise<void> {
+      const selected = await pickDirectory(this.ehLibraryPath.trim());
+      if (!selected) return;
+      this.ehLibraryPath = selected;
+      const rootPath = selected;
+      if (!rootPath) return;
+      try {
+        this.applyEhSettings(await invokeTauri<EhSettings>('eh_bind_local_library', { rootPath }));
+        this.ehLibraryMessage = null;
+        await useEhLibraryStore().load();
+        await this.loadEhDashboard();
+      } catch (error) {
+        this.ehLibraryMessage = { kind: 'err', text: `连接失败：${errorText(error)}` };
+      }
+    },
+
+    async scanEhLibrary(): Promise<void> {
+      const rootPath = this.ehLibraryPath.trim();
+      if (!rootPath || this.ehScanning) return;
+      this.ehScanning = true;
+      this.ehScanCompleted = false;
+      this.ehScanErrors = [];
+      this.ehProgressActive = true;
+      this.ehProgressPercent = 0;
+      this.ehProgressText = '正在准备扫描';
+      let stopProgress: (() => void) | undefined;
+      try {
+        stopProgress = await listenTauri<EhScanProgressEvent>('eh-scan-progress', (progress) => {
+          this.ehProgressActive = true;
+          this.ehProgressPercent = Math.max(0, Math.min(100, progress.percent));
+          this.ehProgressText = progress.text;
+        });
+        const result = await invokeTauri<EhScanResult>('eh_scan_local_library', { rootPath });
+        await Promise.all([useEhLibraryStore().load(), this.loadEhDashboard()]);
+        this.ehScanCompleted = true;
+        this.ehScanErrors = result.errors;
+        const detail = `扫描 ${result.folders} 部，索引 ${result.indexed} 部；新建 Meta ${result.created_meta} 个、封面 ${result.created_cover} 张`;
+        this.ehLibraryMessage = result.errors.length
+          ? { kind: 'err', text: `${detail}；${summarizeEhScanErrors(result.errors)}` }
+          : { kind: 'success', text: detail };
+        this.ehProgressPercent = 100;
+        this.ehProgressText = '扫描完成';
+        await new Promise((resolve) => window.setTimeout(resolve, 650));
+      } catch (error) {
+        this.ehLibraryMessage = { kind: 'err', text: `扫描失败：${errorText(error)}` };
+      } finally {
+        stopProgress?.();
+        this.ehScanning = false;
+        this.ehProgressActive = false;
+        this.ehProgressPercent = 0;
+        this.ehProgressText = '';
+      }
+    },
+
+    async openEhScanIssue(index: number): Promise<void> {
+      const issue = this.ehScanErrors[index];
+      if (issue) await invokeTauri('open_folder', { path: issue.folder_path });
+    },
+
+    async backupEhDatabase(): Promise<void> {
+      const backupPath = this.ehBackupPath.trim() || 'D:\\EhLibrary\\backup.db';
+      try { await invokeTauri('eh_backup_database', { backupPath }); this.ehDataMessage = { kind: 'info', text: `备份成功: ${backupPath}` }; }
+      catch (error) { this.ehDataMessage = { kind: 'err', text: `备份失败：${errorText(error)}` }; }
+    },
+
+    async backupEhDataPackage(): Promise<void> {
+      const backupPath = this.ehBackupPath.trim() || 'D:\\EhLibrary\\eh-data-backup.zip';
+      try { await invokeTauri('eh_backup_data_package', { backupPath }); this.ehDataMessage = { kind: 'info', text: `资料包备份成功: ${backupPath}` }; }
+      catch (error) { this.ehDataMessage = { kind: 'err', text: `资料包备份失败：${errorText(error)}` }; }
+    },
+
+    async restoreEhDatabase(): Promise<void> {
+      const restorePath = this.ehBackupPath.trim();
+      if (!restorePath) return;
+      try { await invokeTauri('eh_restore_database', { restorePath }); this.ehDataMessage = { kind: 'info', text: '恢复成功' }; await Promise.all([useEhLibraryStore().load(), this.loadEhDashboard()]); }
+      catch (error) { this.ehDataMessage = { kind: 'err', text: `恢复失败：${errorText(error)}` }; }
     },
 
     async loadSummary(): Promise<void> {

@@ -8,7 +8,7 @@
     "detailTitle", "duplicateMsg", "episodeList", "filterDropdown", "filterRow", "fitModeBtn", "fullscreenBtn", "jsonPasteMsg",
     "libraryMsg", "mediaPath", "metricArchived", "metricEpisodes", "metricProgress", "metricSize",
     "metricTotalWorks", "metricUnarchived", "mpvHint", "mpvStage", "muteBtn", "page-archive", "page-detail", "pageJump",
-    "page-home", "page-player", "page-settings", "page-unarchived", "pagination", "playerDescriptionBlock",
+    "page-eh-library", "page-eh-reader", "page-home", "page-player", "page-settings", "page-unarchived", "pagination", "playerDescriptionBlock",
     "playerBackplate", "playerDescriptionToggle", "playerDuration", "playerMsg", "playerNextBtn",
     "playerOtherCount", "playerOtherEpisodes", "playerPlayBtn",
     "playerSeek", "playerSeekPreview", "playerSeekPreviewFrame", "playerSeekPreviewTime", "playerSidebar",
@@ -17,5 +17,5 @@
     "searchClear", "searchInput", "sortNameBtn", "sortTimeBtn", "unarchivedCount", "unarchivedIndex",
     "unarchivedList", "unarchivedPath", "workContextMenu"
   ],
-  "pages": ["page-home", "page-detail", "page-player", "page-settings", "page-unarchived", "page-archive"]
+  "pages": ["page-home", "page-eh-library", "page-eh-reader", "page-detail", "page-player", "page-settings", "page-unarchived", "page-archive"]
 }

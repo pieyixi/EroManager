@@ -25,6 +25,7 @@ export function installPlayerController(): () => void {
   const layout = createPlayerLayout(player);
   const thumbnails = createPlayerThumbnails(player, formatPlayerTime);
   let pollTimer: number | null = null;
+  let pollStatusPromise: Promise<void> | null = null;
   let keySeekTimer: number | null = null;
   let keySeekInterval: number | null = null;
   let pointerSeekWasPaused = false;
@@ -70,26 +71,33 @@ export function installPlayerController(): () => void {
     player.keySeekDirection = 0;
   }
 
-  async function pollStatus(): Promise<void> {
-    if (!player.libmpvReady) return;
-    const [current, duration, muted, paused, speed, ended] = await Promise.all([
-      safeMpvGetProperty<number>('time-pos', 'double'),
-      safeMpvGetProperty<number>('duration', 'double'),
-      safeMpvGetProperty<boolean>('mute', 'flag'),
-      safeMpvGetProperty<boolean>('pause', 'flag'),
-      safeMpvGetProperty<number>('speed', 'double'),
-      safeMpvGetProperty<boolean>('eof-reached', 'flag'),
-    ]);
-    if (!player.isSeeking && Number.isFinite(Number(current))) player.currentTime = Number(current);
-    if (Number.isFinite(Number(duration)) && Number(duration) > 0) player.duration = Number(duration);
-    if (!player.editingTime) player.timeInput = formatPlayerTime(player.currentTime);
-    if (muted !== null) player.muted = Boolean(muted);
-    if (paused !== null) player.paused = Boolean(paused);
-    if (Number.isFinite(Number(speed))) player.speed = Number(speed);
-    if (ended && player.loopMode === 'all' && !player.handlingEnd) {
-      player.handlingEnd = true;
-      void playNextEpisode(true).finally(() => { player.handlingEnd = false; });
-    }
+  function pollStatus(): Promise<void> {
+    if (!player.libmpvReady) return Promise.resolve();
+    if (pollStatusPromise) return pollStatusPromise;
+    const request = (async () => {
+      const [current, duration, muted, paused, speed, ended] = await Promise.all([
+        safeMpvGetProperty<number>('time-pos', 'double'),
+        safeMpvGetProperty<number>('duration', 'double'),
+        safeMpvGetProperty<boolean>('mute', 'flag'),
+        safeMpvGetProperty<boolean>('pause', 'flag'),
+        safeMpvGetProperty<number>('speed', 'double'),
+        safeMpvGetProperty<boolean>('eof-reached', 'flag'),
+      ]);
+      if (!player.isSeeking && Number.isFinite(Number(current))) player.currentTime = Number(current);
+      if (Number.isFinite(Number(duration)) && Number(duration) > 0) player.duration = Number(duration);
+      if (!player.editingTime) player.timeInput = formatPlayerTime(player.currentTime);
+      if (muted !== null) player.muted = Boolean(muted);
+      if (paused !== null) player.paused = Boolean(paused);
+      if (Number.isFinite(Number(speed))) player.speed = Number(speed);
+      if (ended && player.loopMode === 'all' && !player.handlingEnd) {
+        player.handlingEnd = true;
+        void playNextEpisode(true).finally(() => { player.handlingEnd = false; });
+      }
+    })();
+    pollStatusPromise = request;
+    return request.finally(() => {
+      if (pollStatusPromise === request) pollStatusPromise = null;
+    });
   }
 
   async function waitForFirstFrame(expectedPath: string): Promise<boolean> {
@@ -476,7 +484,7 @@ export function installPlayerController(): () => void {
     const episode = currentEpisode();
     if (!episode) return;
     try { await invokeTauri('play_video', { videoPath: episode.video_path }); }
-    catch (error) { console.error('play failed:', error); }
+    catch (error) { message('err', `外部播放失败: ${errorText(error)}`); }
   }
 
   async function captureCurrentFrame(): Promise<void> {

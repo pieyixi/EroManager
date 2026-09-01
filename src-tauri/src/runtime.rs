@@ -2,8 +2,8 @@ pub fn run() {
     let db = init_db();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_libmpv::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(db)
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Focused(focused) = event {
@@ -46,6 +46,16 @@ pub fn run() {
             list_unarchived_folders,
             play_video,
             set_player_fullscreen,
+            eh_library::eh_get_settings,
+            eh_library::eh_save_settings,
+            eh_library::eh_bind_local_library,
+            eh_library::eh_scan_local_library,
+            eh_library::eh_get_library_overview,
+            eh_library::eh_get_library_dashboard,
+            eh_library::eh_list_local_galleries,
+            eh_library::eh_delete_gallery_record,
+            eh_library::eh_delete_gallery_folder,
+            eh_library::eh_get_gallery_pages,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

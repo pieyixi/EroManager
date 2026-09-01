@@ -4,6 +4,8 @@ import './assets/styles.css';
 import AppShell from './components/AppShell.vue';
 import ArchivePage from './components/ArchivePage.vue';
 import DetailPage from './components/DetailPage.vue';
+import EhLibraryPage from './components/EhLibraryPage.vue';
+import EhReaderPage from './components/EhReaderPage.vue';
 import GlobalOverlays from './components/GlobalOverlays.vue';
 import HomePage from './components/HomePage.vue';
 import PlayerPage from './components/PlayerPage.vue';
@@ -25,10 +27,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="window" :class="{ 'player-shell-layout': navigation.activePage === 'page-player' }">
+  <div class="window" :class="{ 'player-shell-layout': navigation.activePage === 'page-player', 'reader-shell-layout': navigation.activePage === 'page-eh-reader' }">
     <AppShell />
-    <main class="app-main" :class="{ 'player-content': navigation.activePage === 'page-player' }">
+    <main class="app-main" :class="{ 'player-content': navigation.activePage === 'page-player', 'reader-content': navigation.activePage === 'page-eh-reader' }">
       <HomePage />
+      <EhLibraryPage />
+      <EhReaderPage />
       <DetailPage />
       <PlayerPage />
       <SettingsPage />

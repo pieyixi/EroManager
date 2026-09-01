@@ -11,5 +11,7 @@ tmp/
 *.zip
 clean/
 docs/
+Eh_Info/
+AGENTS.md
 frontend-vue/node_modules/
 frontend-vue/dist/

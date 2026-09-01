@@ -8,19 +8,27 @@ fn normalize_title_for_duplicate(title: &str) -> String {
         .collect()
 }
 
-fn folder_video_stats(folder_path: &str) -> (i32, u64) {
+fn folder_video_stats(folder_path: &str) -> Result<(i32, u64), String> {
     let mut count = 0;
     let mut total = 0;
-    if let Ok(entries) = std::fs::read_dir(folder_path) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_file() && is_video_file(&p) {
-                count += 1;
-                total += entry.metadata().map(|m| m.len()).unwrap_or(0);
-            }
+    let folder = std::path::Path::new(folder_path);
+    if !folder.is_dir() {
+        return Ok((0, 0));
+    }
+    let entries = std::fs::read_dir(folder)
+        .map_err(|e| format!("读取目录失败 {}: {}", folder.display(), e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取目录项失败 {}: {}", folder.display(), e))?;
+        let path = entry.path();
+        if path.is_file() && is_video_file(&path) {
+            count += 1;
+            total += entry
+                .metadata()
+                .map_err(|e| format!("读取文件信息失败 {}: {}", path.display(), e))?
+                .len();
         }
     }
-    (count, total)
+    Ok((count, total))
 }
 
 fn duplicate_signature(title: &str, video_count: i32, total_size: u64) -> String {
@@ -48,8 +56,9 @@ fn detect_duplicates(
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
         .map_err(|e| e.to_string())?;
-    for row in rows.flatten() {
-        let (video_count, total_size) = folder_video_stats(&row.1);
+    for row in rows {
+        let row = row.map_err(|e| e.to_string())?;
+        let (video_count, total_size) = folder_video_stats(&row.1)?;
         let signature = duplicate_signature(&row.0, video_count, total_size);
         buckets.entry(signature).or_default().push(DuplicateItem {
             title: row.0,
@@ -62,39 +71,40 @@ fn detect_duplicates(
 
     let root = std::path::Path::new(&root_path);
     if root.exists() {
-        if let Ok(entries) = std::fs::read_dir(root) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if !p.is_dir() {
-                    continue;
-                }
-                let folder_path = p.to_string_lossy().to_string();
-                let title = p
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                if title.is_empty() {
-                    continue;
-                }
-                let (video_count, total_size) = folder_video_stats(&folder_path);
-                if video_count <= 0 {
-                    continue;
-                }
-                let signature = duplicate_signature(&title, video_count, total_size);
-                let list = buckets.entry(signature).or_default();
-                if !list
-                    .iter()
-                    .any(|item| item.folder_path.eq_ignore_ascii_case(&folder_path))
-                {
-                    list.push(DuplicateItem {
-                        title,
-                        folder_path,
-                        source: "磁盘".to_string(),
-                        video_count,
-                        total_size,
-                    });
-                }
+        let entries = std::fs::read_dir(root)
+            .map_err(|e| format!("读取媒体库目录失败 {}: {}", root.display(), e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("读取媒体库目录项失败: {}", e))?;
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let folder_path = path.to_string_lossy().to_string();
+            let title = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("")
+                .to_string();
+            if title.is_empty() {
+                continue;
+            }
+            let (video_count, total_size) = folder_video_stats(&folder_path)?;
+            if video_count <= 0 {
+                continue;
+            }
+            let signature = duplicate_signature(&title, video_count, total_size);
+            let list = buckets.entry(signature).or_default();
+            if !list
+                .iter()
+                .any(|item| item.folder_path.eq_ignore_ascii_case(&folder_path))
+            {
+                list.push(DuplicateItem {
+                    title,
+                    folder_path,
+                    source: "磁盘".to_string(),
+                    video_count,
+                    total_size,
+                });
             }
         }
     }
@@ -120,35 +130,36 @@ fn list_unarchived_folders(root_path: String) -> Result<Vec<UnarchivedFolder>, S
         return Err("路径不存在".to_string());
     }
     let mut result = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let folder_path = path.to_string_lossy().to_string();
-            let title = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
-            let (video_count, _) = folder_video_stats(&folder_path);
-            if video_count <= 0 {
-                continue;
-            }
-            let data_dir = path.join("data");
-            let meta_json = data_dir.join("meta.json");
-            let missing_reasons = archive_missing_reasons(&folder_path);
-            if !missing_reasons.is_empty() {
-                result.push(UnarchivedFolder {
-                    title,
-                    folder_path,
-                    video_count,
-                    has_data_dir: data_dir.exists(),
-                    has_meta_json: meta_json.exists(),
-                    missing_reasons,
-                });
-            }
+    let entries = std::fs::read_dir(root)
+        .map_err(|e| format!("读取媒体库目录失败 {}: {}", root.display(), e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取媒体库目录项失败: {}", e))?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let folder_path = path.to_string_lossy().to_string();
+        let title = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_string();
+        let (video_count, _) = folder_video_stats(&folder_path)?;
+        if video_count <= 0 {
+            continue;
+        }
+        let data_dir = path.join("data");
+        let meta_json = data_dir.join("meta.json");
+        let missing_reasons = archive_missing_reasons(&folder_path);
+        if !missing_reasons.is_empty() {
+            result.push(UnarchivedFolder {
+                title,
+                folder_path,
+                video_count,
+                has_data_dir: data_dir.exists(),
+                has_meta_json: meta_json.exists(),
+                missing_reasons,
+            });
         }
     }
     result.sort_by(|a, b| a.title.cmp(&b.title));

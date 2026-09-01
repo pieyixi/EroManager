@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useLibraryStore } from '../stores/library';
+import { useEhLibraryStore } from '../stores/ehLibrary';
 import { useNavigationStore } from '../stores/navigation';
 import { useSettingsStore } from '../stores/settings';
 
 const navigation = useNavigationStore();
 const library = useLibraryStore();
+const ehLibrary = useEhLibraryStore();
 const settings = useSettingsStore();
 const menuElement = ref<HTMLElement | null>(null);
 
@@ -30,6 +32,12 @@ async function deleteWork(): Promise<void> {
   const workId = navigation.contextMenu.workId;
   navigation.closeContextMenu();
   if (workId) await library.deleteWork(workId);
+}
+
+async function deleteEhGallery(deleteFolder: boolean): Promise<void> {
+  const gid = navigation.contextMenu.workId;
+  navigation.closeContextMenu();
+  if (gid) await ehLibrary.deleteGallery(gid, deleteFolder);
 }
 
 function handleDocumentPointer(event: MouseEvent): void {
@@ -76,5 +84,7 @@ onBeforeUnmount(() => {
   <div ref="menuElement" class="context-menu" :class="{ active: navigation.contextMenu.visible }" id="workContextMenu" :style="{ left: `${navigation.contextMenu.x}px`, top: `${navigation.contextMenu.y}px` }">
     <button v-if="navigation.contextMenu.mode === 'home'" class="context-item" id="ctxRefreshHome" @click="refreshLibrary">刷新主库</button>
     <button v-if="navigation.contextMenu.mode === 'work'" class="context-item danger" id="ctxDeleteWork" @click="deleteWork">删除作品</button>
+    <button v-if="navigation.contextMenu.mode === 'eh-work'" class="context-item" @click="deleteEhGallery(false)">仅从数据库移除</button>
+    <button v-if="navigation.contextMenu.mode === 'eh-work'" class="context-item danger" @click="deleteEhGallery(true)">删除本地整个文件夹</button>
   </div>
 </template>

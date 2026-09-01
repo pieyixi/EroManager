@@ -2,7 +2,7 @@
 
 This directory is the active Tauri frontend. It uses Vue 3, TypeScript, and Vite.
 
-Version 2.0 makes Vue the active frontend runtime. The previous HTML and JavaScript frontend is no longer part of the active build; remaining global and imperative compatibility bridges are tracked until the final reactive architecture is complete.
+Version 4.0 keeps Vue as the sole frontend runtime and adds the image-library and reader workflows behind the same typed Tauri command boundary. The previous HTML and JavaScript frontend is no longer part of the active build.
 
 ## Compatibility contract
 
@@ -22,6 +22,20 @@ npm run dev
 ```
 
 Tauri runs these commands automatically through `src-tauri/tauri.conf.json`.
+
+## Browser development
+
+`npm run dev` can run directly in a normal browser without Cargo or a Tauri window. In Vite development mode, `src/api/tauri.ts` selects `src/api/webMock.ts` only when the Tauri runtime is absent. The mock provides representative library, detail, incomplete-entry, filter, pagination, and settings data for rapid UI work.
+
+The adapter follows these boundaries:
+
+- A real Tauri runtime always has priority and continues to call the Rust commands.
+- Production builds never enable the browser mock.
+- The mock implements backend response contracts, not duplicated business logic.
+- Native window controls, libmpv playback, filesystem writes, and backup/restore still require Tauri integration testing.
+- Unsupported native commands fail explicitly instead of pretending that an operation succeeded.
+
+Use the browser for layout, responsive behavior, themes, animation, filtering, navigation, and data states. Use Tauri only for the final native integration pass.
 
 ## Structure
 

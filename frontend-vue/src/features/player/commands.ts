@@ -1,7 +1,6 @@
 import type { PlayerEpisode } from '../../stores/app';
+import type { PlayerMode } from '../../stores/player';
 import type { PlayerLayoutElements } from './layout';
-
-export type PlayerMode = 'detail' | 'archive';
 
 export interface PlayerCommandApi {
   bindLayout(elements: PlayerLayoutElements): void;

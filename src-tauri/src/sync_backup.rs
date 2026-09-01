@@ -89,7 +89,7 @@ mod zip_filename_tests {
         assert_ne!(local_flags & 0x0800, 0);
         assert_ne!(central_flags & 0x0800, 0);
         assert!(data
-            .windows(name.as_bytes().len())
+            .windows(name.len())
             .any(|bytes| bytes == name.as_bytes()));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -366,7 +366,8 @@ async fn backup_data_package(
             let rows = statement
                 .query_map([], |row| row.get::<_, String>(0))
                 .map_err(|e| e.to_string())?;
-            rows.filter_map(|row| row.ok()).collect::<Vec<_>>()
+            rows.collect::<Result<Vec<String>, _>>()
+                .map_err(|e| e.to_string())?
         };
 
         emit_backup_progress(&app, 4, "正在生成数据库快照");
@@ -428,27 +429,33 @@ async fn backup_data_package(
 }
 
 #[tauri::command]
-fn load_cover_cache(cover_paths: Vec<String>) -> Result<Vec<(String, String)>, String> {
-    use base64::Engine as _;
-    let mut result = Vec::new();
-    for path in &cover_paths {
-        if let Ok(data) = std::fs::read(path) {
-            let ext = if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" {
-                "jpeg"
-            } else if data.len() > 4 && &data[0..4] == b"\x89PNG" {
-                "png"
-            } else {
-                "jpeg"
-            };
-            let b64 = format!(
-                "data:image/{};base64,{}",
-                ext,
-                base64::engine::general_purpose::STANDARD.encode(&data)
-            );
-            result.push((path.clone(), b64));
+async fn load_cover_cache(cover_paths: Vec<String>) -> Result<Vec<(String, String)>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::Engine as _;
+        let mut result = Vec::new();
+        for path in &cover_paths {
+            if let Ok(data) = std::fs::read(path) {
+                let ext = if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" {
+                    "jpeg"
+                } else if data.len() > 4 && &data[0..4] == b"\x89PNG" {
+                    "png"
+                } else if data.len() > 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+                    "webp"
+                } else {
+                    "jpeg"
+                };
+                let b64 = format!(
+                    "data:image/{};base64,{}",
+                    ext,
+                    base64::engine::general_purpose::STANDARD.encode(&data)
+                );
+                result.push((path.clone(), b64));
+            }
         }
-    }
-    Ok(result)
+        Ok(result)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 // ─── App Entry ────────────────────────────────────────────

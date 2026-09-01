@@ -39,8 +39,8 @@ fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, Stri
             })
         })
         .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<Episode>, _>>()
+        .map_err(|e| e.to_string())?;
 
     // Release dates belong to individual entries in data/meta.json. The database
     // intentionally keeps only the first date for library ordering, so hydrate
@@ -103,8 +103,8 @@ fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, Stri
             })
         })
         .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<Tag>, _>>()
+        .map_err(|e| e.to_string())?;
 
     Ok(WorkDetail {
         work,
@@ -137,10 +137,23 @@ fn get_tags(db: State<Database>) -> Result<Vec<Tag>, String> {
             })
         })
         .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<Tag>, _>>()
+        .map_err(|e| e.to_string())?;
 
     Ok(tags)
+}
+
+struct WorkRow {
+    id: i64,
+    title: String,
+    year: i32,
+    month: i32,
+    studio: String,
+    description: Option<String>,
+    cover_path: Option<String>,
+    folder_path: String,
+    search_aliases: String,
+    episode_count: i64,
 }
 
 fn imported_work_is_available(
@@ -148,33 +161,32 @@ fn imported_work_is_available(
     work_id: i64,
     folder_path: &str,
     cover_path: Option<&str>,
-) -> bool {
+) -> Result<bool, String> {
     if !std::path::Path::new(folder_path).is_dir()
         || !cover_path
             .map(|path| std::path::Path::new(path).is_file())
             .unwrap_or(false)
     {
-        return false;
+        return Ok(false);
     }
-    let Ok(mut statement) = conn.prepare(
-        "SELECT VideoPath, CoverPath FROM Episodes WHERE WorkId=?1 ORDER BY Number",
-    ) else {
-        return false;
-    };
-    let Ok(rows) = statement.query_map(params![work_id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-    }) else {
-        return false;
-    };
-    let episodes: Vec<(String, Option<String>)> = rows.filter_map(Result::ok).collect();
-    !episodes.is_empty()
+    let mut statement = conn
+        .prepare("SELECT VideoPath, CoverPath FROM Episodes WHERE WorkId=?1 ORDER BY Number")
+        .map_err(|e| e.to_string())?;
+    let episodes = statement
+        .query_map(params![work_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<(String, Option<String>)>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(!episodes.is_empty()
         && episodes.iter().all(|(video, cover)| {
             std::path::Path::new(video).is_file()
                 && cover
                     .as_deref()
                     .map(|path| std::path::Path::new(path).is_file())
                     .unwrap_or(false)
-        })
+        }))
 }
 
 fn read_favorite_characters(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
@@ -240,35 +252,24 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
          FROM Works w ORDER BY w.UpdatedAt DESC"
     ).map_err(|e| e.to_string())?;
 
-    let works: Vec<(
-        i64,
-        String,
-        i32,
-        i32,
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-        String,
-        i64,
-    )> = stmt
+    let works = stmt
         .query_map([], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-                row.get(6)?,
-                row.get(7)?,
-                row.get(8)?,
-                row.get(9)?,
-            ))
+            Ok(WorkRow {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                year: row.get(2)?,
+                month: row.get(3)?,
+                studio: row.get(4)?,
+                description: row.get(5)?,
+                cover_path: row.get(6)?,
+                folder_path: row.get(7)?,
+                search_aliases: row.get(8)?,
+                episode_count: row.get(9)?,
+            })
         })
         .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<WorkRow>, _>>()
+        .map_err(|e| e.to_string())?;
 
     let mut tag_stmt = conn
         .prepare(
@@ -282,8 +283,8 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<(i64, i64, String, String)>, _>>()
+        .map_err(|e| e.to_string())?;
 
     let mut tags_map: std::collections::HashMap<i64, Vec<Tag>> = std::collections::HashMap::new();
     for (work_id, tag_id, name, category) in tag_rows {
@@ -294,42 +295,32 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
         });
     }
 
-    let result: Vec<WorkWithTags> = works
-        .into_iter()
-        .filter(|(id, _, _, _, _, _, cover_path, folder_path, _, _)| {
-            imported_work_is_available(&conn, *id, folder_path, cover_path.as_deref())
-        })
-        .map(
-            |(
-                id,
-                title,
-                year,
-                month,
-                studio,
-                description,
-                cover_path,
-                folder_path,
-                search_aliases,
-                episode_count,
-            )| {
-                let release_dates = read_work_release_months(&folder_path, year, month);
-                WorkWithTags {
-                    id,
-                    title,
-                    year,
-                    month,
-                    studio,
-                    description,
-                    cover_path,
-                    folder_path,
-                    episode_count,
-                    release_dates,
-                    search_aliases: serde_json::from_str(&search_aliases).unwrap_or_default(),
-                    tags: tags_map.remove(&id).unwrap_or_default(),
-                }
-            },
-        )
-        .collect();
+    let mut result = Vec::with_capacity(works.len());
+    for work in works {
+        if !imported_work_is_available(
+            &conn,
+            work.id,
+            &work.folder_path,
+            work.cover_path.as_deref(),
+        )? {
+            continue;
+        }
+        let release_dates = read_work_release_months(&work.folder_path, work.year, work.month);
+        result.push(WorkWithTags {
+            id: work.id,
+            title: work.title,
+            year: work.year,
+            month: work.month,
+            studio: work.studio,
+            description: work.description,
+            cover_path: work.cover_path,
+            folder_path: work.folder_path,
+            episode_count: work.episode_count,
+            release_dates,
+            search_aliases: serde_json::from_str(&work.search_aliases).unwrap_or_default(),
+            tags: tags_map.remove(&work.id).unwrap_or_default(),
+        });
+    }
 
     Ok(result)
 }
@@ -460,7 +451,8 @@ mod imported_work_visibility_tests {
             1,
             &root.to_string_lossy(),
             Some(&cover.to_string_lossy())
-        ));
+        )
+        .unwrap());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

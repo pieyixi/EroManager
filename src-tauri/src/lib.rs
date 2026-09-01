@@ -9,4 +9,5 @@ include!("media.rs");
 include!("thumbnail.rs");
 include!("sync_backup.rs");
 include!("library_console.rs");
+mod eh_library;
 include!("runtime.rs");

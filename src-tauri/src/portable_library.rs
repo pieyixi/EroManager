@@ -162,8 +162,8 @@ fn infer_database_root(conn: &Connection) -> Option<std::path::PathBuf> {
     let paths: Vec<String> = statement
         .query_map([], |row| row.get::<_, String>(0))
         .ok()?
-        .filter_map(Result::ok)
-        .collect();
+        .collect::<Result<Vec<String>, _>>()
+        .ok()?;
     let mut counts = std::collections::HashMap::<String, (usize, std::path::PathBuf)>::new();
     for path in paths {
         let Some(parent) = std::path::Path::new(&path)
@@ -231,10 +231,9 @@ fn rebind_database_paths(
             .map_err(|e| e.to_string())?;
         let rows = statement
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<(i64, String, Option<String>)>, _>>()
             .map_err(|e| e.to_string())?
-            .filter_map(Result::ok)
-            .collect();
-        rows
     };
     let episodes: Vec<(i64, String, Option<String>)> = {
         let mut statement = transaction
@@ -242,10 +241,9 @@ fn rebind_database_paths(
             .map_err(|e| e.to_string())?;
         let rows = statement
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<(i64, String, Option<String>)>, _>>()
             .map_err(|e| e.to_string())?
-            .filter_map(Result::ok)
-            .collect();
-        rows
     };
 
     let mut changed = 0;
@@ -290,8 +288,11 @@ fn has_database_paths_under(conn: &Connection, root: &std::path::Path) -> bool {
         .and_then(|mut statement| {
             statement
                 .query_map([], |row| row.get::<_, String>(0))
-                .map(|rows| {
-                    rows.filter_map(Result::ok)
+                .map(|rows| rows.collect::<Result<Vec<String>, _>>())
+                .map(|paths| {
+                    paths
+                        .unwrap_or_default()
+                        .into_iter()
                         .any(|path| relative_under_root(&path, root).is_some())
                 })
         })
@@ -330,7 +331,10 @@ fn target_matches_existing_library(
 ) -> bool {
     let paths: Vec<String> = match conn.prepare("SELECT FolderPath FROM Works") {
         Ok(mut statement) => match statement.query_map([], |row| row.get::<_, String>(0)) {
-            Ok(rows) => rows.filter_map(Result::ok).collect(),
+            Ok(rows) => match rows.collect::<Result<Vec<String>, _>>() {
+                Ok(paths) => paths,
+                Err(_) => return false,
+            },
             Err(_) => return false,
         },
         Err(_) => return false,

@@ -251,9 +251,7 @@ fn episode_number_from_path(path: &std::path::Path) -> Option<i32> {
         for next in stem[idx + ch.len_utf8()..].chars() {
             if let Some(digit) = next.to_digit(10) {
                 digits.push(char::from_digit(digit, 10).unwrap());
-            } else if !digits.is_empty() {
-                break;
-            } else if !next.is_whitespace() {
+            } else if !digits.is_empty() || !next.is_whitespace() {
                 break;
             }
         }
@@ -272,12 +270,14 @@ fn display_file_name(path: &std::path::Path) -> String {
 }
 
 fn collect_numbered_video_paths(path: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let mut videos: Vec<_> = std::fs::read_dir(path)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && is_video_file(p))
-        .collect();
+    let mut videos = Vec::new();
+    for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| format!("读取目录项失败 {}: {}", path.display(), e))?;
+        let entry_path = entry.path();
+        if entry_path.is_file() && is_video_file(&entry_path) {
+            videos.push(entry_path);
+        }
+    }
     videos.sort();
 
     let mut numbered = Vec::new();

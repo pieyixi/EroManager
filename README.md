@@ -2,7 +2,7 @@
 
 A portable, local-first desktop application for organizing and reviewing a privately maintained media collection.
 
-The application is designed for offline use. It keeps its index beside the executable, reads structured metadata from local folders, and does not require a hosted service.
+Local browsing, playback, and reading work offline. Optional source downloads require an internet connection. The application keeps its index beside the executable and does not require a hosted account service.
 
 ## Features
 
@@ -23,9 +23,16 @@ The application is designed for offline use. It keeps its index beside the execu
 - Vue 3, TypeScript, Pinia, and Vite
 - libmpv
 
-## Version 4.0
+## Version 5.0
 
-Version 4.0 extends the local-first catalog with a second image-based library and a dedicated reader while preserving the completed Vue 3 and TypeScript architecture.
+Version 5.0 improves download workflows, reader interactions, and maintainability while preserving the portable, local-first catalog.
+
+- Dedicated two-source download page with a shared FIFO work queue and separate histories.
+- Cover-based progress and status, bounded automatic retries, and incremental failed-page recovery.
+- Validated image payloads, atomic file replacement, and guarded resume/deletion boundaries.
+- Admission-time sorting that preserves scan history and brings completed downloads forward.
+- Reader fullscreen controls, right-to-left progress, and mixed-DPI window-bound handling.
+- Explicit Rust domain modules and typed frontend/backend contracts with automated parity checks.
 
 - Vue single-file components define the page structure.
 - Pinia stores own shared state and long-running workflows.
@@ -47,7 +54,6 @@ Version 4.0 extends the local-first catalog with a second image-based library an
 ```text
 frontend-vue/ Active Vue frontend
 src-tauri/    Rust backend and desktop configuration
-tools/        Local development utilities
 ```
 
 ## Development
@@ -66,13 +72,16 @@ npm install
 npm run build
 ```
 
-`npm run build` runs unit tests, the UI contract check, strict TypeScript validation, and the Vite production build.
+`npm run build` runs unit tests, architecture and command/response/UI contract checks, strict TypeScript validation, and the Vite production build.
 
 Build the Windows release:
 
 ```powershell
-cargo tauri build
+npm --prefix frontend-vue run build
+cargo build --release --manifest-path src-tauri\Cargo.toml
 ```
+
+The portable package contains only `hanime-manager.exe`, `hanime_manager_lib.dll`, `lib/libmpv-2.dll`, and `lib/libmpv-wrapper.dll`. Build output is not an installed update; back up the previous runtime and replace only these program files. Never overwrite an existing database or user-data folder.
 
 ## Data Policy
 

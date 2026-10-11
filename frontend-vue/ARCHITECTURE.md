@@ -20,6 +20,8 @@ src/
 |-- main.ts                         Vue, Pinia, and root mount
 |-- api/
 |   |-- tauri.ts                    Runtime-selecting backend adapter
+|   |-- contracts/                  Rust-facing DTOs shared by stores and mocks
+|   |-- commands/                   One typed wrapper per backend command family
 |   `-- webMock.ts                  Development-only browser contract fixtures
 |-- components/
 |   |-- HomePage.vue                Library grid, filters, sorting, pagination
@@ -31,11 +33,12 @@ src/
 |   |-- SettingsPage.vue            Library console, synchronization, backups
 |   `-- GlobalOverlays.vue          Confirmation modal and context menu
 |-- stores/
-|   |-- app.ts                      Shared archive draft and backend data types
 |   |-- navigation.ts               Pages, confirmation state, context menu
 |   |-- library.ts                  Works, covers, filters, detail, pagination
 |   |-- archive.ts                  Incomplete folders and authoring workflow
-|   |-- settings.ts                 Binding, scans, imports, updates, backups
+|   |-- libraryConsole.ts           Main-library binding, scans, imports, updates, backups
+|   |-- ehSettings.ts               Eh binding, credentials, scans, and dashboard
+|   |-- ehDownload.ts               Cross-source FIFO queue, progress, retries, and source-specific history
 |   |-- ehLibrary.ts                Local gallery browsing and metadata workflow
 |   `-- player.ts                   Playback and timeline-preview state
 |-- features/player/
@@ -76,9 +79,10 @@ Lower layers do not import page components. Stores do not locate DOM elements. C
 - `navigation`: active page, confirmation modal, and context menu.
 - `library`: works, filters, sorting, responsive page size, cover cache, and selected detail.
 - `archive`: incomplete folders, index navigation, draft metadata, and cover edits.
-- `settings`: library binding, scan progress, synchronization results, and backups.
+- `libraryConsole`: main-library binding, scan progress, synchronization results, duplicates, and backups.
+- `ehSettings`: Eh path/credentials, scan progress, and dashboard data.
+- `ehDownload`: source-specific inputs, process-local FIFO queue and credentials, progress, failed-page retry, and credential-free local history. `EhDownloadPage`/`EhDownloadLane` render the shared second-level download workspace and per-source cover cards.
 - `player`: playback session, controls, playlist mode, fullscreen state, preview cache, and native viewport masks.
-- `app`: archive draft data shared with capture mode plus common backend types. It is not a second library or player state source.
 
 ## Native Player Boundary
 
@@ -87,6 +91,8 @@ The libmpv child window is not a Vue DOM node. `layout.ts` receives the video st
 `thumbnails.ts` keeps a bounded in-memory cache, progressive prefetch plan, pointer-velocity prediction, and exact-frame refinement. It updates reactive preview state and never writes to the DOM.
 
 `controller.ts` owns mpv initialization, polling, seeking, loop transitions, fullscreen calls, and capture orchestration. `PlayerPage.vue` owns all visible text, classes, controls, playlist markup, and accessibility state.
+
+`assets/styles.css` is a small ordered entry point. Its numbered files under `assets/styles/` preserve the existing cascade while keeping foundation, page workflows, shell, theme, settings, and responsive rules reviewable in separate files.
 
 ## Verification Gates
 
@@ -97,7 +103,8 @@ The libmpv child window is not a Vue DOM node. `layout.ts` receives the video st
 3. Zero application DOM queries.
 4. Zero HTML string injection.
 5. Stable UI identifiers and no inline handlers.
-6. Strict Vue TypeScript validation.
-7. Vite production build.
+6. Typed command parity between API wrappers, Rust registration, and Web Mock.
+7. Strict Vue TypeScript validation.
+8. Vite production build.
 
 The native verification set additionally covers Rust tests, embedded playback, timeline preview, pointer seeking, pause/resume, next-episode playback, sidebar resizing, fullscreen controls, maximized-window restoration, cross-monitor movement, and return navigation.

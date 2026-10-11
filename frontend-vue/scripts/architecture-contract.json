@@ -1,13 +1,23 @@
 {
-  "baselineCommit": "f255de6b1f2c10271c980fab96b395bc72c0d7a6",
   "currentMaximum": {
     "globalBridgeReferences": 0,
     "domQueries": 0,
-    "htmlWrites": 0
+    "htmlWrites": 0,
+    "rawInvokeOutsideApi": 0,
+    "apiStoreDependencies": 0,
+    "storeDomWrites": 0
   },
   "finalTarget": {
     "globalBridgeReferences": 0,
     "domQueries": 0,
-    "htmlWrites": 0
+    "htmlWrites": 0,
+    "rawInvokeOutsideApi": 0,
+    "apiStoreDependencies": 0,
+    "storeDomWrites": 0
+  },
+  "fileSize": {
+    "maxLines": 500,
+    "maxBytes": 60000,
+    "allowlist": {}
   }
 }

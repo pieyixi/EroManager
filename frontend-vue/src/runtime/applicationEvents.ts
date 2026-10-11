@@ -3,7 +3,9 @@ import { playerCommands } from "../features/player/commands";
 import type { useLibraryStore } from "../stores/library";
 import { useNavigationStore } from "../stores/navigation";
 import { usePlayerStore } from "../stores/player";
-import { useSettingsStore } from "../stores/settings";
+import { useLibraryConsoleStore } from "../stores/libraryConsole";
+import { useEhLibraryStore } from "../stores/ehLibrary";
+import { useEhReaderStore } from "../stores/ehReader";
 
 type LibraryStore = ReturnType<typeof useLibraryStore>;
 
@@ -21,7 +23,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 export function installApplicationEvents(library: LibraryStore): () => void {
   const navigation = useNavigationStore();
   const player = usePlayerStore();
-  const settings = useSettingsStore();
+  const settings = useLibraryConsoleStore();
   const cleanups: Array<() => void> = [];
 
   function listen<K extends keyof WindowEventMap>(
@@ -130,9 +132,6 @@ export function installApplicationEvents(library: LibraryStore): () => void {
       if (
         preview === "eh-reader"
       ) {
-        const [{ useEhLibraryStore }, { useEhReaderStore }] = await Promise.all(
-          [import("../stores/ehLibrary"), import("../stores/ehReader")],
-        );
         const ehLibrary = useEhLibraryStore();
         await ehLibrary.load();
         if (ehLibrary.galleries[0]) {

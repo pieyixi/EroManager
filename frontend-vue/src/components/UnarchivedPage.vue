@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue';
 import { restoredUnarchivedScrollTop, summarizeUnarchivedReasons, unarchivedIndexLetters, useArchiveStore, type UnarchivedItem } from '../stores/archive';
-import { useAppStore } from '../stores/app';
 import { useNavigationStore } from '../stores/navigation';
 
-const app = useAppStore();
 const archive = useArchiveStore();
 const navigation = useNavigationStore();
 const listElement = ref<HTMLElement | null>(null);
@@ -33,7 +31,7 @@ function scrollToIndex(letter: string): void {
 function updateIndexFromScroll(): void {
   const list = listElement.value;
   if (!list || archive.unarchivedLoading) return;
-  app.unarchivedScrollTop = list.scrollTop;
+  archive.unarchivedScrollTop = list.scrollTop;
   const anchors = archive.groupedFolders.map((group) => anchorElements.get(group.letter)).filter((anchor): anchor is HTMLElement => Boolean(anchor));
   if (!anchors.length) return;
   let current = anchors[0].dataset.indexAnchor || '';
@@ -45,9 +43,9 @@ function updateIndexFromScroll(): void {
 function openArchive(item: UnarchivedItem): void {
   const list = listElement.value;
   const card = cardElements.get(item.folder_path);
-  if (list) app.unarchivedScrollTop = list.scrollTop;
-  app.unarchivedFocusPath = item.folder_path;
-  app.unarchivedFocusOffset = list && card ? Math.max(0, card.offsetTop - list.scrollTop) : 0;
+  if (list) archive.unarchivedScrollTop = list.scrollTop;
+  archive.unarchivedFocusPath = item.folder_path;
+  archive.unarchivedFocusOffset = list && card ? Math.max(0, card.offsetTop - list.scrollTop) : 0;
   void archive.openArchiveAssistant(item.folder_path);
 }
 
@@ -62,12 +60,12 @@ watch(() => archive.unarchivedLoading, async (loading) => {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   const list = listElement.value;
   if (!list) return;
-  const focusedCard = cardElements.get(app.unarchivedFocusPath);
+  const focusedCard = cardElements.get(archive.unarchivedFocusPath);
   list.scrollTop = restoredUnarchivedScrollTop(
-    app.unarchivedScrollTop,
+    archive.unarchivedScrollTop,
     list.scrollHeight - list.clientHeight,
     focusedCard?.offsetTop,
-    app.unarchivedFocusOffset,
+    archive.unarchivedFocusOffset,
   );
   updateIndexFromScroll();
 });

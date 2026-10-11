@@ -1,0 +1,69 @@
+#page-eh-download.active{overflow:auto}
+.eh-download-workspace{width:100%;min-width:0;min-height:100%;padding:22px 28px 36px}
+.eh-download-lanes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:18px;width:100%;max-width:1660px;margin:0 auto}
+.eh-download-lane{min-width:0;padding:22px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 8px 30px rgba(21,33,54,.035)}
+.eh-download-lane-head{display:flex;align-items:center;gap:12px;min-height:44px}
+.eh-download-lane-brand{display:grid;place-items:center;width:38px;height:38px;flex:0 0 38px;border-radius:11px;background:linear-gradient(145deg,#4e79e9,#2556d5);color:#fff;font-size:20px;font-weight:760;box-shadow:0 5px 14px rgba(48,93,201,.2)}
+.eh-download-lane-brand.hitomi{background:linear-gradient(145deg,#7a6ad3,#52409f);box-shadow:0 5px 14px rgba(92,76,161,.2)}
+.eh-download-lane-heading{min-width:0}
+.eh-download-lane-heading h2{color:var(--text-strong);font-size:16px;font-weight:700;line-height:1.2}
+.eh-download-lane-heading p{margin-top:4px;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eh-download-lane-count{margin-left:auto;color:var(--muted);font-size:10px;white-space:nowrap}
+.eh-download-lane-form{margin-top:18px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--subtle-bg)}
+.eh-download-lane-fields{display:grid;align-content:start;min-height:78px;gap:10px}
+.eh-download-lane-fields label{display:grid;grid-template-columns:48px minmax(0,1fr);align-items:center;gap:8px;color:var(--text-secondary);font-size:12px}
+.eh-download-lane-fields input{width:100%;min-width:0}
+.eh-download-lane-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.eh-download-lane-actions button{min-width:88px;height:34px}
+.eh-download-lane-actions .btn-primary:not(.download-clear-button){color:#fff}
+.eh-download-lane-actions .download-clear-button{border-color:var(--line-strong);background:#fff;color:#374151;box-shadow:none}
+.eh-download-lane-actions .download-clear-button:hover:not(:disabled){border-color:#b8c0ca;background:#f9fafb;box-shadow:0 4px 10px rgba(27,39,64,.08);transform:translateY(-1px)}
+/* 仅有消息时才占一行；覆盖通用消息外边距，不按屏幕高度预留空白。 */
+.eh-download-lane-feedback{height:34px;margin-top:8px}
+.eh-download-lane-feedback .settings-msg{height:34px;overflow:auto;margin:0;padding:7px 10px;font-size:11px;line-height:18px;overflow-wrap:anywhere}
+.eh-download-lane-group{min-width:0;margin-top:20px}
+.eh-download-lane-group>header{display:flex;align-items:baseline;gap:9px;margin-bottom:12px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+.eh-download-lane-group>header h3{color:var(--text-strong);font-size:13px;font-weight:700}
+.eh-download-lane-group>header span{color:var(--muted);font-size:10px}
+.eh-download-lane-empty{display:grid;min-height:84px;place-items:center;padding:16px;border:1px dashed var(--line-strong);border-radius:9px;color:var(--muted);font-size:11px;text-align:center}
+.eh-download-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));align-items:stretch;gap:12px;min-width:0}
+.eh-download-card{min-width:0;padding:7px;border:1px solid var(--line);border-radius:9px;background:var(--surface);box-shadow:0 3px 10px rgba(20,31,48,.035)}
+.eh-download-poster{position:relative;width:100%;aspect-ratio:3/4;overflow:hidden;border-radius:6px;background:var(--media-bg)}
+.eh-download-poster img{display:block;width:100%;height:100%;object-fit:cover}
+.eh-download-cover-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;width:100%;height:100%;background:radial-gradient(circle at 32% 28%,color-mix(in srgb,var(--primary) 11%,var(--media-bg)),var(--media-bg) 72%);color:var(--soft)}
+.eh-download-cover-placeholder .fluent-icon{font-size:32px}
+.eh-download-cover-placeholder small{max-width:90%;font-size:10px;text-align:center}
+.eh-download-status-badge{position:absolute;z-index:1;top:8px;right:8px;display:inline-flex;align-items:center;gap:5px;max-width:calc(100% - 16px);min-height:23px;padding:0 8px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(16,24,39,.78);box-shadow:0 2px 9px rgba(0,0,0,.2);backdrop-filter:blur(8px);color:#fff;font-size:10px;font-weight:650;line-height:1.2;white-space:nowrap}
+.eh-download-status-mark{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:#9bb2d1;box-shadow:0 0 0 2px rgba(255,255,255,.12)}
+.eh-download-status-badge.active .eh-download-status-mark{background:#70a4ff;animation:downloadStatusPulse 1.8s ease-in-out infinite}
+.eh-download-status-badge.failed .eh-download-status-mark{background:#ff6b7d}
+.eh-download-status-badge.complete .eh-download-status-mark{background:#42cc8c}
+@keyframes downloadStatusPulse{50%{box-shadow:0 0 0 5px rgba(112,164,255,.22)}}
+.eh-download-card-progress{height:5px;overflow:hidden;margin-top:6px;border-radius:3px;background:var(--track)}
+.eh-download-card-progress.is-idle{visibility:hidden}
+.eh-download-card-progress span{display:block;height:100%;border-radius:inherit;background:var(--primary);transition:width .25s ease}
+.eh-download-card-body{display:flex;flex-direction:column;gap:3px;min-width:0;height:58px;padding:7px 2px 0}
+.eh-download-card-body strong{display:-webkit-box;min-height:32px;overflow:hidden;color:var(--text-strong);font-size:11px;font-weight:650;line-height:16px;overflow-wrap:anywhere;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.eh-download-card-body small{display:block;min-width:0;overflow:hidden;color:var(--muted);font-size:10px;line-height:14px;text-overflow:ellipsis;white-space:nowrap}
+.eh-download-card-action{height:27px;padding:0 8px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);color:var(--text-secondary);font-family:inherit;font-size:10px;font-weight:600;line-height:1;cursor:pointer;white-space:nowrap}
+.eh-download-card-action:hover{background:var(--surface-hover);border-color:var(--primary);color:var(--primary)}
+.eh-download-card-action.primary{border-color:color-mix(in srgb,var(--primary) 25%,var(--line));background:var(--primary-soft);color:var(--primary)}
+/* 操作区沿用标题/页数的左右内边距；重试按文字宽度，垃圾桶独立固定。 */
+.eh-download-card-actions{display:flex;align-items:center;justify-content:space-between;gap:5px;height:27px;margin-top:2px;padding:0 2px}
+.eh-download-card-actions .eh-download-card-action{min-width:0;max-width:100%;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}
+.eh-download-card-trash{display:grid;place-items:center;width:27px;height:27px;flex:0 0 27px;margin-left:auto;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:13px;cursor:pointer}
+.eh-download-card-trash:hover{background:var(--danger-soft);color:var(--danger)}
+.eh-download-failure-anchor{padding:0}
+.eh-download-failure-anchor button{display:inline-flex;align-items:center;gap:5px;max-width:100%;min-height:22px;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;white-space:nowrap}
+.eh-download-failure-anchor:hover{background:rgba(16,24,39,.92);border-color:rgba(255,255,255,.35)}
+.eh-download-failure-anchor button:focus-visible{outline:2px solid #fff;outline-offset:-3px;border-radius:999px}
+.eh-download-failure-popover{position:fixed;z-index:13000;width:min(300px,calc(100vw - 24px));max-height:min(270px,calc(100vh - 24px));overflow:auto;padding:12px;border:1px solid var(--line-strong);border-radius:9px;background:var(--panel);box-shadow:0 12px 35px rgba(14,24,42,.18);color:var(--text-secondary);font-size:11px;line-height:1.45}
+.eh-download-failure-popover strong{display:block;margin-bottom:7px;color:var(--text-strong);font-size:12px}
+.eh-download-failure-popover p{margin:0;overflow-wrap:anywhere}
+.eh-download-failure-row{display:flex;align-items:start;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line)}
+.eh-download-failure-row span{min-width:0;overflow-wrap:anywhere}
+.eh-download-failure-row button{flex:0 0 auto;border:0;background:transparent;color:var(--primary);font:600 11px/1.4 inherit;cursor:pointer}
+:root[data-theme="dark"] .eh-download-lane{box-shadow:0 8px 28px rgba(0,0,0,.1)}
+:root[data-theme="dark"] .eh-download-lane-actions .download-clear-button{border-color:#d1d5db;background:#fff;color:#374151}
+@media(max-width:1050px){.eh-download-lanes{grid-template-columns:1fr}}
+@media(max-width:700px){.eh-download-workspace{padding:14px 12px 24px}.eh-download-lane{padding:15px}.eh-download-lane-head{flex-wrap:wrap}.eh-download-lane-count{width:100%;margin-left:50px}}

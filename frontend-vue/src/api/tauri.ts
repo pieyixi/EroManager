@@ -8,9 +8,13 @@ interface TauriCore {
 export interface TauriWindowHandle {
   minimize(): Promise<void>;
   toggleMaximize(): Promise<void>;
+  maximize(): Promise<void>;
+  unmaximize(): Promise<void>;
   close(): Promise<void>;
   startDragging(): Promise<void>;
   isMaximized(): Promise<boolean>;
+  isFullscreen(): Promise<boolean>;
+  setFullscreen(fullscreen: boolean): Promise<void>;
   onResized(handler: () => void): Promise<() => void>;
 }
 

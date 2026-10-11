@@ -1,21 +1,17 @@
 import { defineStore } from 'pinia';
 import { nextTick } from 'vue';
-import { invokeTauri } from '../api/tauri';
+import { archiveApi } from '../api/commands/archive';
+import { libraryApi } from '../api/commands/library';
+import { systemApi } from '../api/commands/system';
+import { copyText } from '../runtime/clipboard';
 import { playerCommands } from '../features/player/commands';
-import { type ArchiveDraft, type ArchiveEpisode, useAppStore } from './app';
+import type { ArchiveDraft, ArchiveEpisode, ArchiveSaveInput } from '../api/contracts/archive';
+import type { UnarchivedItem } from '../api/contracts/library';
 import { useLibraryStore } from './library';
+import { useLibraryConsoleStore } from './libraryConsole';
 import { useNavigationStore } from './navigation';
-import { useSettingsStore } from './settings';
 
-export interface UnarchivedItem {
-  title: string;
-  folder_path: string;
-  video_count: number;
-  has_data_dir: boolean;
-  has_meta_json: boolean;
-  missing_reasons: string[];
-  index_letter?: string;
-}
+export type { UnarchivedItem } from '../api/contracts/library';
 
 type MessageKind = 'info' | 'err';
 interface UiMessage { kind: MessageKind; text: string }
@@ -100,6 +96,9 @@ function splitTags(value: string): string[] {
 
 export const useArchiveStore = defineStore('archive', {
   state: () => ({
+    unarchivedScrollTop: 0,
+    unarchivedFocusPath: '',
+    unarchivedFocusOffset: 0,
     unarchivedPath: 'D:\\HAnime',
     folders: [] as UnarchivedItem[],
     unarchivedLoading: false,
@@ -117,6 +116,11 @@ export const useArchiveStore = defineStore('archive', {
     refreshing: false,
     copied: false,
     mainCoverPreview: '',
+    draft: null as ArchiveDraft | null,
+    coverData: null as string | null,
+    episodeCoverData: {} as Record<number, string>,
+    dataPath: '',
+    focusEpisode: null as number | null,
   }),
 
   getters: {
@@ -124,7 +128,7 @@ export const useArchiveStore = defineStore('archive', {
     groupedFolders: (state): Array<{ letter: string; items: UnarchivedItem[] }> => indexLetters
       .map((letter) => ({ letter, items: state.folders.filter((item) => item.index_letter === letter) }))
       .filter((group) => group.items.length),
-    draft(): ArchiveDraft | null { return useAppStore().archive.draft; },
+    currentDraft(state): ArchiveDraft | null { return state.draft; },
     episodes(): ArchiveEpisode[] { return this.draft?.episode_list || []; },
   },
 
@@ -133,15 +137,14 @@ export const useArchiveStore = defineStore('archive', {
     showJsonMessage(kind: MessageKind, text: string): void { this.jsonMessage = { kind, text }; },
 
     async openUnarchivedPage(): Promise<void> {
-      const app = useAppStore();
       const navigation = useNavigationStore();
       const returning = navigation.activePage === 'page-archive';
       if (!returning) {
-        app.unarchivedScrollTop = 0;
-        app.unarchivedFocusPath = '';
-        app.unarchivedFocusOffset = 0;
+        this.unarchivedScrollTop = 0;
+        this.unarchivedFocusPath = '';
+        this.unarchivedFocusOffset = 0;
       }
-      this.unarchivedPath = useSettingsStore().mediaPath.trim() || 'D:\\HAnime';
+      this.unarchivedPath = useLibraryConsoleStore().mediaPath.trim() || 'D:\\HAnime';
       navigation.showPage('page-unarchived');
       await this.loadUnarchivedFolders();
     },
@@ -152,7 +155,7 @@ export const useArchiveStore = defineStore('archive', {
       this.unarchivedLoading = true;
       this.unarchivedError = '';
       try {
-        const folders = await invokeTauri<UnarchivedItem[]>('list_unarchived_folders', { rootPath: path });
+        const folders = await libraryApi.listUnarchivedFolders(path);
         folders.forEach((item) => { item.index_letter = getUnarchivedIndexLetter(item.title); });
         folders.sort((left, right) => indexLetters.indexOf(left.index_letter || '#') - indexLetters.indexOf(right.index_letter || '#') || collator.compare(left.title, right.title));
         this.folders = folders;
@@ -169,8 +172,11 @@ export const useArchiveStore = defineStore('archive', {
     },
 
     async openArchiveAssistant(dirPath = '', focusEpisode?: number | null): Promise<void> {
-      const app = useAppStore();
-      app.archive = { draft: null, coverData: null, episodeCoverData: {}, dataPath: '', focusEpisode: focusEpisode || null };
+      this.draft = null;
+      this.coverData = null;
+      this.episodeCoverData = {};
+      this.dataPath = '';
+      this.focusEpisode = focusEpisode || null;
       this.dirPath = dirPath;
       this.title = '';
       this.searchAliasesText = '';
@@ -184,7 +190,7 @@ export const useArchiveStore = defineStore('archive', {
       useNavigationStore().showPage('page-archive');
       if (!dirPath) return;
       try {
-        app.archive.dataPath = await invokeTauri<string>('ensure_archive_data_dir', { dirPath });
+        this.dataPath = await archiveApi.ensureDataDir(dirPath);
         await this.loadArchiveDraft();
       } catch (error) {
         this.showMessage('err', `准备 data 文件夹失败: ${errorText(error)}`);
@@ -192,12 +198,11 @@ export const useArchiveStore = defineStore('archive', {
     },
 
     async loadArchiveDraft(): Promise<void> {
-      const app = useAppStore();
       const dirPath = this.dirPath.trim();
       if (!dirPath) { this.showMessage('err', '请先填写作品目录'); return; }
       try {
-        const draft = await invokeTauri<ArchiveDraft>('inspect_archive_folder', { dirPath });
-        app.archive.draft = draft;
+        const draft = await archiveApi.inspectFolder(dirPath);
+        this.draft = draft;
         this.title = draft.title || '';
         this.searchAliasesText = (draft.search_aliases || []).join('\n');
         this.studio = draft.studio || '';
@@ -215,20 +220,19 @@ export const useArchiveStore = defineStore('archive', {
     },
 
     episodePreview(episode: ArchiveEpisode): string {
-      const app = useAppStore();
-      return app.archive.episodeCoverData[episode.id] || useLibraryStore().coverUrl(episode.cover_path);
+      return this.episodeCoverData[episode.id] || useLibraryStore().coverUrl(episode.cover_path || undefined);
     },
 
     async setMainCover(file?: File): Promise<void> {
       if (!file) return;
       const dataUrl = await fileToDataUrl(file);
-      useAppStore().archive.coverData = dataUrl;
+      this.coverData = dataUrl;
       this.mainCoverPreview = dataUrl;
     },
 
     async setEpisodeCover(episodeId: number, file?: File): Promise<void> {
       if (!file) return;
-      useAppStore().archive.episodeCoverData[episodeId] = await fileToDataUrl(file);
+      this.episodeCoverData[episodeId] = await fileToDataUrl(file);
     },
 
     async playEpisodeForCover(episodeId: number): Promise<void> {
@@ -237,8 +241,7 @@ export const useArchiveStore = defineStore('archive', {
       await playerCommands.openPlayerWithEpisode({ id: episode.id, number: episode.id, video_path: episode.video_path }, `${this.draft?.title || '建档'} / 第${episode.id}集取帧`, 'archive');
     },
 
-    collectArchiveInput(): Record<string, unknown> {
-      const app = useAppStore();
+    collectArchiveInput(): ArchiveSaveInput {
       if (!this.draft) throw new Error('请先读取目录');
       const characters: Record<string, string> = {};
       this.charactersText.split(/\r?\n/).map((name) => name.trim()).filter(Boolean).forEach((name, index) => { characters[String(index + 1)] = name; });
@@ -254,22 +257,21 @@ export const useArchiveStore = defineStore('archive', {
           attribute: splitTags(Array.isArray(episode.tags.attribute) ? episode.tags.attribute.join(',') : String(episode.tags.attribute || '')),
           scene: splitTags(Array.isArray(episode.tags.scene) ? episode.tags.scene.join(',') : String(episode.tags.scene || '')),
         } })),
-        cover_data: app.archive.coverData,
+        cover_data: this.coverData,
       };
     },
 
     async saveArchive(shouldImport: boolean): Promise<void> {
-      const app = useAppStore();
       try {
         const input = this.collectArchiveInput();
         if (!this.title.trim()) { this.showMessage('err', '标题不能为空'); return; }
-        const coverInputs = Object.entries(app.archive.episodeCoverData).map(([id, image_data]) => ({ id: Number.parseInt(id, 10), image_data }));
-        if (coverInputs.length) await invokeTauri('save_archive_episode_covers', { input: { dir_path: this.dirPath.trim(), covers: coverInputs } });
-        const outPath = await invokeTauri<string>('save_archive_draft', { input });
+        const coverInputs = Object.entries(this.episodeCoverData).map(([id, image_data]) => ({ id: Number.parseInt(id, 10), image_data }));
+        if (coverInputs.length) await archiveApi.saveEpisodeCovers(this.dirPath.trim(), coverInputs);
+        const outPath = await archiveApi.saveDraft(input);
         const library = useLibraryStore();
         library.clearArchiveCoverCaches(this.dirPath.trim(), this.episodes);
         if (shouldImport) {
-          await invokeTauri('import_work_via_json', { dirPath: this.dirPath.trim() });
+          await libraryApi.importWork(this.dirPath.trim());
           await library.refreshHome({ resetFilters: true, clearCoverCache: true });
         }
         this.showMessage('info', shouldImport ? `已保存并导入: ${outPath}` : `已保存: ${outPath}`);
@@ -285,10 +287,10 @@ export const useArchiveStore = defineStore('archive', {
       if (!jsonText) { this.showJsonMessage('err', '请先粘贴 meta.json'); return; }
       try { JSON.parse(jsonText); } catch (error) { this.showJsonMessage('err', `JSON 格式错误: ${errorText(error)}`); return; }
       try {
-        const outPath = await invokeTauri<string>('save_archive_json', { dirPath, jsonText });
+        const outPath = await archiveApi.saveJson(dirPath, jsonText);
         await this.loadArchiveDraft();
         try {
-          await invokeTauri('import_work_via_json', { dirPath });
+          await libraryApi.importWork(dirPath);
           await useLibraryStore().refreshHome({ resetFilters: true, clearCoverCache: true });
           this.showJsonMessage('info', `已保存并导入主库: ${outPath}`);
         } catch (importError) {
@@ -300,22 +302,21 @@ export const useArchiveStore = defineStore('archive', {
     },
 
     async openWorkFolder(): Promise<void> {
-      if (this.dirPath.trim()) await invokeTauri('open_folder', { path: this.dirPath.trim() });
+      if (this.dirPath.trim()) await systemApi.openFolder(this.dirPath.trim());
     },
 
     async refreshDraft(): Promise<void> {
-      const app = useAppStore();
       if (!this.dirPath.trim() || this.refreshing) return;
       this.refreshing = true;
       try {
-        if (app.archive.draft) {
+        if (this.draft) {
           const library = useLibraryStore();
-          if (app.archive.draft.cover_path) delete library.coverCache[app.archive.draft.cover_path];
-          app.archive.draft.episode_list.forEach((episode) => { if (episode.cover_path) delete library.coverCache[episode.cover_path]; });
-          library.clearArchiveCoverCaches(this.dirPath.trim(), app.archive.draft.episode_list);
+          if (this.draft.cover_path) delete library.coverCache[this.draft.cover_path];
+          this.draft.episode_list.forEach((episode) => { if (episode.cover_path) delete library.coverCache[episode.cover_path]; });
+          library.clearArchiveCoverCaches(this.dirPath.trim(), this.draft.episode_list);
         }
-        app.archive.coverData = null;
-        app.archive.episodeCoverData = {};
+        this.coverData = null;
+        this.episodeCoverData = {};
         this.jsonText = '';
         this.jsonMessage = null;
         this.mainCoverPreview = '';
@@ -326,21 +327,10 @@ export const useArchiveStore = defineStore('archive', {
     },
 
     async copyDataPath(): Promise<void> {
-      const app = useAppStore();
       if (!this.dirPath.trim()) return;
-      const dataPath = app.archive.dataPath || `${this.dirPath.replace(/[\\/]+$/, '')}\\data`;
+      const dataPath = this.dataPath || `${this.dirPath.replace(/[\\/]+$/, '')}\\data`;
       try {
-        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(dataPath);
-        else {
-          const input = document.createElement('textarea');
-          input.value = dataPath;
-          input.style.position = 'fixed';
-          input.style.opacity = '0';
-          document.body.appendChild(input);
-          input.select();
-          if (!document.execCommand('copy')) throw new Error('系统剪贴板不可用');
-          input.remove();
-        }
+        await copyText(dataPath);
         this.copied = true;
         window.setTimeout(() => { this.copied = false; }, 1200);
       } catch (error) {

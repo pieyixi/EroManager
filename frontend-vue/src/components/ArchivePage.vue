@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { nextTick, watch, type ComponentPublicInstance } from 'vue';
-import type { ArchiveEpisode } from '../stores/app';
-import { useAppStore } from '../stores/app';
+import type { ArchiveEpisode } from '../api/contracts/archive';
 import { useArchiveStore } from '../stores/archive';
 import { useNavigationStore } from '../stores/navigation';
 
 const archive = useArchiveStore();
-const app = useAppStore();
 const navigation = useNavigationStore();
 const editorElements = new Map<number, HTMLElement>();
 
@@ -15,14 +13,14 @@ function registerEditor(element: Element | ComponentPublicInstance | null, episo
   else editorElements.delete(episodeId);
 }
 
-watch(() => app.archive.focusEpisode, async (episodeId) => {
+watch(() => archive.focusEpisode, async (episodeId) => {
   if (!episodeId || navigation.activePage !== 'page-archive') return;
   await nextTick();
   const editor = editorElements.get(episodeId);
   editor?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   editor?.classList.add('archive-focus');
   window.setTimeout(() => editor?.classList.remove('archive-focus'), 1600);
-  app.archive.focusEpisode = null;
+  archive.focusEpisode = null;
 }, { immediate: true });
 
 function dropFile(event: DragEvent): File | undefined {

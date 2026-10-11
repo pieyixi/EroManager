@@ -1,4 +1,4 @@
-import type { PlayerEpisode } from '../../stores/app';
+import type { PlayerEpisode } from '../../api/contracts/library';
 import type { PlayerFitMode } from '../../stores/player';
 
 export const playerFitModes: Record<PlayerFitMode, { label: string; panscan: number; unscaled: boolean }> = {

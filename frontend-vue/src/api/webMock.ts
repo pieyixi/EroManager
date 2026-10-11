@@ -1,9 +1,20 @@
-import type { ArchiveDraft, TagSummary, WorkDetail, WorkSummary } from '../stores/app';
-import type { UnarchivedItem } from '../stores/archive';
-import type { EhGallerySummary } from '../stores/ehLibrary';
+import type { ArchiveDraft } from './contracts/archive';
+import type { TagSummary, WorkDetail, WorkSummary, UnarchivedItem } from './contracts/library';
+import type { EhGallerySummary } from './contracts/eh';
 
 type InvokeArgs = Record<string, unknown>;
 type MockHandler = (args: InvokeArgs) => unknown | Promise<unknown>;
+const mockListeners = new Map<string, Set<(payload: unknown) => void>>();
+async function simulateDownload(event: string, gid: number, total: number): Promise<void> {
+  for (let step = 1; step <= 3; step += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 360));
+    const payload = {
+      gid, page: Math.round(total * step / 3), total_pages: total,
+      percent: Math.round(step / 3 * 100), text: `已处理 ${Math.round(total * step / 3)} / ${total} 页`,
+    };
+    mockListeners.get(event)?.forEach((handler) => handler(payload));
+  }
+}
 
 const palette = [
   ['#f5b7c7', '#6d3850'], ['#b9d9f3', '#315a78'], ['#d9c5ef', '#59416f'],
@@ -38,11 +49,13 @@ const works: WorkSummary[] = Array.from({ length: 48 }, (_, index) => {
     studio: studios[index % studios.length],
     description: '这是浏览器开发模式使用的界面验证数据，用于检查长文本、筛选、分页和详情布局。',
     cover_path: `mock://cover/${id}`,
+    folder_path: `D:\\MockLibrary\\Work-${id}`,
+    episode_count: id % 5 + 2,
     tags: [
-      { name: storyTags[index % storyTags.length], category: '剧情' },
-      { name: attributeTags[index % attributeTags.length], category: '属性' },
-      { name: sceneTags[index % sceneTags.length], category: '场景' },
-      { name: `角色${index % 9 + 1}`, category: '人物' },
+      { id: id * 10 + 1, name: storyTags[index % storyTags.length], category: '剧情' },
+      { id: id * 10 + 2, name: attributeTags[index % attributeTags.length], category: '属性' },
+      { id: id * 10 + 3, name: sceneTags[index % sceneTags.length], category: '场景' },
+      { id: id * 10 + 4, name: `角色${index % 9 + 1}`, category: '人物' },
     ],
   };
 });
@@ -60,13 +73,21 @@ let ehGalleries: EhGallerySummary[] = Array.from({ length: 42 }, (_, index) => {
   const gid = 440955 + index * 137;
   return {
     gid,
+    token: `mock-token-${gid}`,
+    source: 'eh',
+    source_id: String(gid),
+    language: '',
     title: ['ラブプレグ', 'Garden Notes', '夏色アーカイブ', '星降る夜の記録', '午後のスケッチ', '冬のアルバム'][index % 6] + ` ${index + 1}`,
-    category: ['doujinshi', 'manga', 'artist cg'][index % 3],
+    category: [2, 4, 8][index % 3],
     artist: [`artist-${index % 8 + 1}`],
     group: [`circle-${index % 6 + 1}`],
     tags: ['sole female', ['schoolgirl', 'glasses', 'long hair', 'swimsuit'][index % 4], ['original', 'full color', 'story arc'][index % 3]],
+    artist_display: [`artist-${index % 8 + 1}`],
+    group_display: [`circle-${index % 6 + 1}`],
+    tags_display: ['sole female', ['schoolgirl', 'glasses', 'long hair', 'swimsuit'][index % 4], ['original', 'full color', 'story arc'][index % 3]],
     pages: 18 + index % 64,
     posted: `${2010 - Math.floor(index / 8)}-${String(12 - index % 12).padStart(2, '0')}-08`,
+    added_at: `2026-08-${String(31 - index % 28).padStart(2, '0')} 12:00:00`,
     cover_path: `mock://eh-cover/${gid}`,
     folder_path: `D:\\MockEhLibrary\\${gid}-Gallery-${index + 1}`,
   };
@@ -77,13 +98,21 @@ let ehSettings = {
 };
 ehGalleries[0] = {
   gid: 440955,
+  token: 'mock-token-440955',
+  source: 'eh',
+  source_id: '440955',
+  language: '',
   title: 'ラブプレグ',
   category: 2,
   artist: ['ミサキ糖'],
   group: ['MISAKIX MEGAMIX'],
   tags: ['blowjob', 'impregnation', 'lactation', 'netorare', 'pregnant', 'vaginal birth', 'x-ray'],
+  artist_display: ['ミサキ糖'],
+  group_display: ['MISAKIX MEGAMIX'],
+  tags_display: ['blowjob', 'impregnation', 'lactation', 'netorare', 'pregnant', 'vaginal birth', 'x-ray'],
   pages: 38,
   posted: '2011-12-08',
+  added_at: '2026-08-31 12:00:00',
   cover_path: 'mock://eh-cover/440955',
   folder_path: 'D:\\MockEhLibrary\\440955-Gallery',
 };
@@ -105,7 +134,9 @@ function detail(workId: number): WorkDetail {
     characters,
     episodes: Array.from({ length: id % 5 + 2 }, (_, index) => ({
       id: index + 1,
+      work_id: id,
       number: index + 1,
+      title: index % 2 ? `第 ${index + 1} 集副标题` : '',
       subtitle: index % 2 ? `第 ${index + 1} 集副标题` : '',
       release_date: `${work.year}-${String((index % 12) + 1).padStart(2, '0')}`,
       video_path: `mock://video/${id}/${index + 1}`,
@@ -116,12 +147,16 @@ function detail(workId: number): WorkDetail {
 
 function archiveDraft(dirPath: string): ArchiveDraft {
   return {
+    dir_path: dirPath,
     title: dirPath.split(/[\\/]/).filter(Boolean).at(-1) || '待建档作品',
     search_aliases: [], studio: '', synopsis: '', characters: {}, episodes: 3,
     episode_list: Array.from({ length: 3 }, (_, index) => ({
-      id: index + 1, subtitle: '', release_date: '', video_path: `${dirPath}\\episode-${index + 1}.mp4`,
+      id: index + 1, subtitle: '', release_date: '', video_path: `${dirPath}\\episode-${index + 1}.mp4`, cover_path: null,
       tags: { theme: [], attribute: [], scene: [] },
     })),
+    cover_path: null,
+    getchu_url: '',
+    hanime_url: '',
   };
 }
 
@@ -143,6 +178,11 @@ const ehCategoryMetrics = [
 const handlers: Record<string, MockHandler> = {
   initialize_media_library: () => ({ root_path: 'D:\\MockLibrary', source: 'previous', rebound_paths: 0, needs_binding: false }),
   bind_media_library: ({ rootPath }) => ({ root_path: String(rootPath || 'D:\\MockLibrary'), source: 'manual', rebound_paths: 0, needs_binding: false }),
+  apply_library_updates: () => 0,
+  batch_import_folders: () => 0,
+  backup_database: () => undefined,
+  backup_data_package: ({ backupPath }) => String(backupPath || 'D:\\MockLibrary\\backup.zip'),
+  restore_database: () => undefined,
   get_all_works_with_tags: () => structuredClone(works),
   get_tags: () => allTags(),
   get_studios: () => [...studios],
@@ -153,6 +193,19 @@ const handlers: Record<string, MockHandler> = {
     return [...favoriteCharacters];
   },
   get_work_detail: ({ workId }) => detail(Number(workId)),
+  import_work_via_json: () => 1,
+  prepare_temp_frame_capture: () => ({ path: 'mock://temp/frame.jpg' }),
+  read_image_data: () => ({ image_data: coverData('截图', 0) }),
+  get_video_thumbnail: ({ time }) => ({ time: Number(time || 0), image_data: coverData('预览', Number(time || 0)) }),
+  prime_video_thumbnail: () => ({ image_data: coverData('预览', 0) }),
+  prefetch_video_thumbnails: ({ times }) => (times as number[] || []).map((time) => ({ time, image_data: coverData('预览', time) })),
+  release_video_thumbnail_decoders: () => undefined,
+  play_video: () => undefined,
+  set_player_fullscreen: () => undefined,
+  save_archive_cover: () => 'D:\\MockLibrary\\data\\cover.jpg',
+  save_archive_draft: () => 'D:\\MockLibrary\\data\\meta.json',
+  save_archive_episode_covers: () => [],
+  save_archive_json: () => 'D:\\MockLibrary\\data\\meta.json',
   load_cover_cache: ({ coverPaths }) => (coverPaths as string[] || []).map((path, index) => [path, path.startsWith('/@fs/') ? path : coverData(path, index, path.includes('episode') || (path.includes('eh-page') && /\/(8|19)$/.test(path)))]),
   eh_delete_gallery_record: ({ gid }) => {
     ehGalleries = ehGalleries.filter((gallery) => gallery.gid !== Number(gid));
@@ -160,6 +213,10 @@ const handlers: Record<string, MockHandler> = {
   },
   eh_delete_gallery_folder: ({ gid }) => {
     ehGalleries = ehGalleries.filter((gallery) => gallery.gid !== Number(gid));
+    return null;
+  },
+  hitomi_delete_gallery_folder: ({ id }) => {
+    ehGalleries = ehGalleries.filter((gallery) => gallery.gid !== -Number(id));
     return null;
   },
   list_unarchived_folders: () => structuredClone(unarchived),
@@ -186,12 +243,48 @@ const handlers: Record<string, MockHandler> = {
     ehSettings = { root_path: value.rootPath, ipb_member_id: value.ipbMemberId, ipb_pass_hash: value.ipbPassHash, igneous: value.igneous };
     return structuredClone(ehSettings);
   },
-  eh_get_gallery_pages: ({ gid }) => Array.from({ length: Number(gid) === 440955 ? 38 : 28 }, (_, index) => ({ index, path: `mock://eh-page/${gid}/${index + 1}`, width: index === 7 || index === 18 ? 1600 : 1000, height: index === 7 || index === 18 ? 1000 : 1500 })),
+  eh_download_gallery: async ({ input }) => {
+    const value = input as { gid?: number; token?: string; pageIndices?: number[] };
+    const gid = Number(value.gid || 0);
+    if (!Number.isSafeInteger(gid) || gid <= 0 || !value.token?.trim()) throw new Error('GID 或 Token 无效');
+    const gallery = ehGalleries.find((item) => item.gid === gid) || {
+      ...ehGalleries[0], gid, source_id: String(gid), token: value.token,
+      title: `Eh 示例作品 ${gid}`, pages: 28,
+      folder_path: `D:\\MockEhLibrary\\${gid}-sample`, cover_path: `mock://cover/eh-${gid}`,
+    };
+    const selected = value.pageIndices?.length ? value.pageIndices.length : gallery.pages;
+    await simulateDownload('eh-download-progress', gid, selected);
+    ehGalleries = [{ ...gallery, added_at: new Date().toISOString() }, ...ehGalleries.filter((item) => item.gid !== gid)];
+    return {
+      gid: gallery.gid,
+      title: gallery.title,
+      folder_path: gallery.folder_path,
+      total_pages: gallery.pages,
+      downloaded_pages: selected,
+      failures: [],
+      meta_path: `${gallery.folder_path}\\data\\meta.json`,
+      cover_path: gallery.cover_path,
+    };
+  },
+  hitomi_download_gallery: async ({ input }) => {
+    const value = input as { id?: number; pageIndices?: number[] };
+    const id = Number(value.id || 0);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error('请输入有效的 Hitomi ID');
+    await simulateDownload('hitomi-download-progress', -id, value.pageIndices?.length || 30);
+    const gallery: EhGallerySummary = {
+      gid: -id, token: '', source: 'hitomi', source_id: String(id), language: 'japanese',
+      title: `Hitomi 示例作品 ${id}`, category: 4, artist: ['示例画师'], group: [], tags: ['sample'],
+      artist_display: ['示例画师'], group_display: [], tags_display: ['示例'], pages: 30,
+      posted: '2026-01-01 00:00:00', added_at: new Date().toISOString(),
+      cover_path: `mock://cover/hitomi-${id}`, folder_path: `D:\\MockEhLibrary\\hitomi-${id}-sample`,
+    };
+    ehGalleries = [gallery, ...ehGalleries.filter((item) => item.gid !== -id)];
+    return { gid: -id, title: gallery.title, folder_path: gallery.folder_path, total_pages: gallery.pages,
+      downloaded_pages: gallery.pages, failures: [], meta_path: `${gallery.folder_path}\\data\\meta.json`, cover_path: gallery.cover_path };
+  },
+  eh_get_gallery_pages: ({ gid }) => Array.from({ length: Number(gid) < 0 ? 30 : Number(gid) === 440955 ? 38 : 28 }, (_, index) => ({ index, path: `mock://eh-page/${gid}/${index + 1}`, width: index === 7 || index === 18 ? 1600 : 1000, height: index === 7 || index === 18 ? 1000 : 1500 })),
   eh_bind_local_library: ({ rootPath }) => ({ ...ehSettings, root_path: String(rootPath) }),
   eh_scan_local_library: () => ({ folders: 10, indexed: 10, created_meta: 9, created_cover: 9, removed_records: 0, skipped: 0, errors: [] }),
-  eh_backup_database: () => undefined,
-  eh_backup_data_package: () => undefined,
-  eh_restore_database: () => undefined,
   open_folder: () => undefined,
   delete_work: ({ workId }) => {
     const index = works.findIndex((work) => work.id === Number(workId));
@@ -205,6 +298,13 @@ export async function invokeBrowserMock<T>(command: string, args: InvokeArgs = {
   return await handler(args) as T;
 }
 
-export function listenBrowserMock<T>(_event: string, _handler: (payload: T) => void): () => void {
-  return () => undefined;
+export function listenBrowserMock<T>(event: string, handler: (payload: T) => void): () => void {
+  let listeners = mockListeners.get(event);
+  if (!listeners) { listeners = new Set(); mockListeners.set(event, listeners); }
+  const listener = handler as (payload: unknown) => void;
+  listeners.add(listener);
+  return () => {
+    listeners?.delete(listener);
+    if (!listeners?.size) mockListeners.delete(event);
+  };
 }

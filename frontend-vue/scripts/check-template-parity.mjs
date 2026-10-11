@@ -37,7 +37,7 @@ function compare(label, expected, actual) {
     missing.length ? `missing: ${missing.join(', ')}` : '',
     added.length ? `added: ${added.join(', ')}` : '',
   ].filter(Boolean).join('\n  ');
-  throw new Error(`${label} differs from the legacy template\n  ${details}`);
+  throw new Error(`${label} differs from the UI contract\n  ${details}`);
 }
 
 const componentIds = unique(values(componentHtml, /(?:^|\s)id="([^"]+)"/gm));

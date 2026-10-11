@@ -9,18 +9,20 @@ import {
 } from "vue";
 import { currentTauriWindow, type TauriWindowHandle } from "../api/tauri";
 import { useArchiveStore } from "../stores/archive";
-import { type FilterKey, useLibraryStore } from "../stores/library";
+import { type DropdownPosition, type FilterKey, useLibraryStore } from "../stores/library";
 import { useNavigationStore } from "../stores/navigation";
 import { type EhFilterKey, useEhLibraryStore } from "../stores/ehLibrary";
-import { useSettingsStore } from "../stores/settings";
+import { useLibraryConsoleStore } from "../stores/libraryConsole";
 import { useUiStore } from "../stores/ui";
 import ShellBackButton from "./ShellBackButton.vue";
+import ShellFilterDropdowns from "./ShellFilterDropdowns.vue";
+import WindowControls from "./WindowControls.vue";
 
 const navigation = useNavigationStore();
 const ehLibrary = useEhLibraryStore();
 const library = useLibraryStore();
 const archive = useArchiveStore();
-const settings = useSettingsStore();
+const settings = useLibraryConsoleStore();
 const ui = useUiStore();
 const searchElement = ref<HTMLInputElement | null>(null);
 const searchContainer = ref<HTMLElement | null>(null);
@@ -29,6 +31,13 @@ const ehDropdownPosition = ref({ top: 0, left: 0, width: 310 });
 const maximized = ref(false);
 let appWindow: TauriWindowHandle | null = null;
 let stopResize: (() => void) | null = null;
+
+const ehFilterLabels: Record<EhFilterKey, string> = {
+  category: "分类",
+  artist: "画师",
+  group: "社团",
+  tag: "Tag",
+};
 
 const isHome = computed(() => navigation.activePage === "page-home");
 const isEh = computed(() => navigation.activePage === "page-eh-library");
@@ -42,6 +51,7 @@ const pageTitle = computed(
       ({
         "page-detail": "作品详情",
         "page-settings": "设置",
+        "page-eh-download": "作品下载",
         "page-unarchived": "未建档",
         "page-archive": "建档助手",
         "page-eh-library": "本地书库",
@@ -51,35 +61,6 @@ const pageTitle = computed(
 const unarchivedCount = computed(() =>
   Math.max(archive.folders.length, settings.unarchivedCount),
 );
-const dropdownStyle = computed(() => ({
-  top: `${library.dropdownPosition.top}px`,
-  left: `${library.dropdownPosition.left}px`,
-  width: `${library.dropdownPosition.width}px`,
-  transform: "translateX(-50%)",
-}));
-const genericOptions = computed(() =>
-  library.openDropdown && library.openDropdown !== "year"
-    ? library.filterOptions(library.openDropdown)
-    : [],
-);
-const filterLabels: Record<FilterKey, string> = {
-  year: "发行时间",
-  studio: "制作商",
-  story: "剧情",
-  attr: "属性",
-  scene: "场景",
-};
-const activeFilterCount = computed(() =>
-  library.openDropdown
-    ? Object.keys(library.activeFilters[library.openDropdown] || {}).length
-    : 0,
-);
-const ehFilterLabels: Record<EhFilterKey, string> = {
-  category: "分类",
-  artist: "画师",
-  group: "社团",
-  tag: "Tag",
-};
 const shellSearch = computed({
   get: () => (isEh.value ? ehLibrary.search : library.search),
   set: (value: string) => {
@@ -99,7 +80,14 @@ const showShellClear = computed(() =>
 function openFilter(key: FilterKey, event: MouseEvent): void {
   event.stopPropagation();
   collapseSearch();
-  library.toggleDropdown(key, event.currentTarget as HTMLElement);
+  const button = event.currentTarget as HTMLElement;
+  const rect = button.getBoundingClientRect();
+  const width = Math.min(key === 'year' ? 410 : key === 'studio' ? 180 : 480, window.innerWidth - 20);
+  const half = width / 2;
+  const shellInset = 64 + 8;
+  const left = Math.max(shellInset + half, Math.min(window.innerWidth - 8 - half, rect.left + rect.width / 2));
+  const position: DropdownPosition = { top: rect.bottom + 2, left, width };
+  library.toggleDropdown(key, position);
 }
 
 function clearSearch(): void {
@@ -142,7 +130,9 @@ function goHome(): void {
 }
 
 function goBack(): void {
-  if (navigation.activePage === "page-archive")
+  if (navigation.activePage === "page-eh-download")
+    navigation.showPage("page-settings");
+  else if (navigation.activePage === "page-archive")
     void archive.openUnarchivedPage();
   else if (
     navigation.activePage === "page-detail" &&
@@ -269,7 +259,7 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="sidebar-item"
-        :class="{ active: navigation.activePage === 'page-settings' }"
+        :class="{ active: navigation.activePage === 'page-settings' || navigation.activePage === 'page-eh-download' }"
         aria-label="设置"
         @click="settings.openSettingsPage"
       >
@@ -378,6 +368,16 @@ onBeforeUnmount(() => {
             ehLibrary.currentSort === "name-desc" ? "\uE74A" : "\uE74B"
           }}</span>
         </button>
+        <button
+          class="top-sort-btn"
+          :class="{ active: ehLibrary.currentSort.startsWith('added') }"
+          title="切换入库顺序"
+          @click="ehLibrary.toggleAddedSort"
+        >
+          入库<span class="fluent-icon">{{
+            ehLibrary.currentSort === "added-desc" ? "\uE74A" : "\uE74B"
+          }}</span>
+        </button>
       </template>
       <template v-else>
         <span class="titlebar-page-name">{{ pageTitle }}</span>
@@ -443,28 +443,12 @@ onBeforeUnmount(() => {
       </button>
       <span class="titlebar-search-icon fluent-icon">&#xE721;</span>
     </div>
-    <div class="window-control-divider"></div>
-    <div class="window-controls">
-      <button
-        class="window-control minimize"
-        title="最小化"
-        aria-label="最小化"
-        @click="minimizeWindow"
-      ></button>
-      <button
-        class="window-control maximize"
-        :class="{ restore: maximized }"
-        :title="maximized ? '还原' : '最大化'"
-        :aria-label="maximized ? '还原' : '最大化'"
-        @click="toggleMaximize"
-      ></button>
-      <button
-        class="window-control close"
-        title="关闭"
-        aria-label="关闭"
-        @click="closeWindow"
-      ></button>
-    </div>
+    <WindowControls
+      :maximized="maximized"
+      @minimize="minimizeWindow"
+      @toggle-maximize="toggleMaximize"
+      @close="closeWindow"
+    />
   </header>
 
   <div
@@ -473,190 +457,13 @@ onBeforeUnmount(() => {
     data-tauri-drag-region
     @dblclick.self="toggleMaximize"
   >
-    <div class="window-control-divider"></div>
-    <div class="window-controls">
-      <button
-        class="window-control minimize"
-        title="最小化"
-        aria-label="最小化"
-        @click="minimizeWindow"
-      ></button>
-      <button
-        class="window-control maximize"
-        :class="{ restore: maximized }"
-        :title="maximized ? '还原' : '最大化'"
-        :aria-label="maximized ? '还原' : '最大化'"
-        @click="toggleMaximize"
-      ></button>
-      <button
-        class="window-control close"
-        title="关闭"
-        aria-label="关闭"
-        @click="closeWindow"
-      ></button>
-    </div>
+    <WindowControls
+      :maximized="maximized"
+      @minimize="minimizeWindow"
+      @toggle-maximize="toggleMaximize"
+      @close="closeWindow"
+    />
   </div>
 
-  <Teleport to="body">
-    <div
-      v-if="library.openDropdown"
-      id="filterDropdown"
-      class="filter-dd"
-      :class="{ 'year-dd': library.openDropdown === 'year' }"
-      :data-key="library.openDropdown"
-      :style="dropdownStyle"
-      @click.stop
-    >
-      <div class="filter-dd-head">
-        <div>
-          <strong>{{ filterLabels[library.openDropdown] }}</strong>
-        </div>
-        <span v-if="activeFilterCount" class="filter-dd-count"
-          >已选 {{ activeFilterCount }}</span
-        >
-      </div>
-      <template v-if="library.openDropdown === 'year'">
-        <div class="year-picker">
-          <div class="year-list">
-            <button
-              v-for="year in library.years"
-              :key="year"
-              class="year-option"
-              :class="{
-                current: library.dropdownYear === year,
-                selected: library.isSelected('year', String(year)),
-              }"
-              @click="library.toggleWholeYear(year)"
-            >
-              <span>{{ year }}</span
-              ><span class="year-check fluent-icon">{{
-                library.isSelected("year", String(year)) ? "\uE73E" : "\uE76C"
-              }}</span>
-            </button>
-          </div>
-          <div class="month-panel">
-            <div class="month-panel-title">
-              <strong>{{ library.dropdownYear }}</strong
-              ><span>按月份细分</span>
-            </div>
-            <div class="month-grid">
-              <button
-                v-for="month in 12"
-                :key="month"
-                class="month-cell"
-                :class="{
-                  selected: library.isSelected(
-                    'year',
-                    `${library.dropdownYear}-${String(month).padStart(2, '0')}`,
-                  ),
-                }"
-                @click="
-                  library.toggleYearMonth(
-                    `${library.dropdownYear}-${String(month).padStart(2, '0')}`,
-                  )
-                "
-              >
-                {{ String(month).padStart(2, "0") }}月
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="dd-actions">
-          <button
-            class="dd-reset"
-            :disabled="!activeFilterCount"
-            @click="library.clearFilter('year')"
-          >
-            重置</button
-          ><button class="dd-confirm" @click="library.closeDropdown">
-            完成
-          </button>
-        </div>
-      </template>
-      <template v-else>
-        <div
-          class="dd-body"
-          :class="library.openDropdown === 'studio' ? 'col' : 'row'"
-        >
-          <button
-            v-for="option in genericOptions"
-            :key="option.value"
-            class="dd-tag"
-            :class="{
-              selected: library.isSelected(library.openDropdown!, option.value),
-            }"
-            @click="library.toggleFilter(library.openDropdown!, option.value)"
-          >
-            <span>{{ option.label }}</span
-            ><span
-              v-if="library.isSelected(library.openDropdown!, option.value)"
-              class="dd-tag-check fluent-icon"
-              >&#xE73E;</span
-            >
-          </button>
-        </div>
-        <div class="dd-actions">
-          <button
-            class="dd-reset"
-            :disabled="!activeFilterCount"
-            @click="library.clearFilter(library.openDropdown!)"
-          >
-            重置</button
-          ><button class="dd-confirm" @click="library.closeDropdown">
-            完成
-          </button>
-        </div>
-      </template>
-    </div>
-  </Teleport>
-  <Teleport to="body">
-    <div
-      v-if="ehLibrary.openDropdown"
-      class="filter-dd"
-      :style="{
-        top: `${ehDropdownPosition.top}px`,
-        left: `${ehDropdownPosition.left}px`,
-        width: `${ehDropdownPosition.width}px`,
-        transform: 'translateX(-50%)',
-      }"
-      @click.stop
-    >
-      <div class="filter-dd-head">
-        <strong>{{ ehFilterLabels[ehLibrary.openDropdown] }}</strong
-        ><span
-          v-if="ehLibrary.activeFilters[ehLibrary.openDropdown]?.length"
-          class="filter-dd-count"
-          >已选
-          {{ ehLibrary.activeFilters[ehLibrary.openDropdown].length }}</span
-        >
-      </div>
-      <div
-        class="dd-body"
-        :class="ehLibrary.openDropdown === 'category' ? 'col' : 'row'"
-      >
-        <button
-          v-for="option in ehLibrary.options(ehLibrary.openDropdown)"
-          :key="option"
-          class="dd-tag"
-          :class="{
-            selected: ehLibrary.isSelected(ehLibrary.openDropdown, option),
-          }"
-          @click="ehLibrary.toggleFilter(ehLibrary.openDropdown!, option)"
-        >
-          {{ ehLibrary.optionLabel(ehLibrary.openDropdown, option) }}
-        </button>
-      </div>
-      <div class="dd-actions">
-        <button
-          class="dd-reset"
-          :disabled="!ehLibrary.activeFilters[ehLibrary.openDropdown]?.length"
-          @click="ehLibrary.clearFilter(ehLibrary.openDropdown!)"
-        >
-          重置</button
-        ><button class="dd-confirm" @click="ehLibrary.closeDropdown">
-          完成
-        </button>
-      </div>
-    </div>
-  </Teleport>
+  <ShellFilterDropdowns :eh-dropdown-position="ehDropdownPosition" />
 </template>

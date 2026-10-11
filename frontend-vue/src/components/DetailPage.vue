@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { playerCommands } from "../features/player/commands";
-import type { TagSummary } from "../stores/app";
+import type { TagSummary } from "../api/contracts/library";
 import { type FilterKey, useLibraryStore } from "../stores/library";
 import { type EhFilterKey, ehCategoryLabel, ehDisplayValues, useEhLibraryStore } from "../stores/ehLibrary";
 import { useEhReaderStore } from "../stores/ehReader";
@@ -33,7 +33,7 @@ const displayCoverUrl = computed(() =>
 );
 const episodes = computed(() => detail.value?.episodes || []);
 
-type DetailTag = TagSummary & { rawName?: string };
+type DetailTag = Pick<TagSummary, "name" | "category"> & { id?: number; rawName?: string };
 
 interface DetailRow {
   label: string;
@@ -46,6 +46,10 @@ const detailRows = computed<DetailRow[]>(() => {
   if (isEhDetail.value && ehGallery.value) {
     const gallery = ehGallery.value;
     return [
+      ...(gallery.source === 'hitomi' ? [
+        { label: "来源", tags: [{ name: `Hitomi · ${gallery.source_id || Math.abs(gallery.gid)}`, category: "来源" }] },
+        ...(gallery.language ? [{ label: "语言", tags: [{ name: gallery.language, category: "语言" }] }] : []),
+      ] : []),
       { label: "分类", tags: [{ name: ehCategoryLabel(gallery.category), category: "分类" }] },
       {
         label: "画师",
@@ -143,7 +147,7 @@ function handleTagClick(row: DetailRow, tag: DetailTag): void {
   }
 }
 
-function tagTitle(row: DetailRow, tag: TagSummary): string | undefined {
+function tagTitle(row: DetailRow, tag: DetailTag): string | undefined {
   if (row.label !== "角色") return undefined;
   return library.isFavoriteCharacter(tag.name) ? "取消收藏角色" : "收藏角色";
 }

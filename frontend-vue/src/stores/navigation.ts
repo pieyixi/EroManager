@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 
-export type PageId = 'page-home' | 'page-eh-library' | 'page-eh-reader' | 'page-detail' | 'page-player' | 'page-settings' | 'page-unarchived' | 'page-archive';
-export type ContextMenuMode = 'home' | 'work' | 'eh-work';
+export type PageId = 'page-home' | 'page-eh-library' | 'page-eh-reader' | 'page-detail' | 'page-player' | 'page-settings' | 'page-eh-download' | 'page-unarchived' | 'page-archive';
+export type ContextMenuMode = 'home' | 'work' | 'eh-home' | 'eh-work' | 'eh-history';
 
 interface ConfirmationState {
   visible: boolean;
@@ -42,7 +42,6 @@ export const useNavigationStore = defineStore('navigation', {
   actions: {
     showPage(page: PageId): void {
       this.activePage = page;
-      if (page !== 'page-player') document.body.classList.remove('player-mode', 'player-fullscreen', 'player-archive-mode');
     },
     askConfirm(title: string, body: string, actionText = '确认', destructive = false): Promise<boolean> {
       this.resolveConfirm(false);

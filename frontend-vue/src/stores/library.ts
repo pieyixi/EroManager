@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
-import { invokeTauri } from '../api/tauri';
-import type { TagSummary, WorkDetail, WorkSummary } from './app';
+import { libraryApi } from '../api/commands/library';
+import { mediaApi } from '../api/commands/media';
+import { systemApi } from '../api/commands/system';
+import type { TagSummary, WorkDetail, WorkSummary } from '../api/contracts/library';
 import { useNavigationStore } from './navigation';
 
 export type FilterKey = 'year' | 'studio' | 'story' | 'attr' | 'scene';
@@ -211,17 +213,12 @@ export const useLibraryStore = defineStore('library', {
     isFilterActive(key: FilterKey): boolean {
       return Boolean(this.activeFilters[key] && Object.keys(this.activeFilters[key]).length);
     },
-    toggleDropdown(key: FilterKey, button: HTMLElement): void {
+    toggleDropdown(key: FilterKey, position?: DropdownPosition): void {
       if (this.openDropdown === key) {
         this.closeDropdown();
         return;
       }
-      const width = Math.min(key === 'year' ? 410 : key === 'studio' ? 180 : 480, window.innerWidth - 20);
-      const bounds = button.getBoundingClientRect();
-      const half = width / 2;
-      const shellInset = 64 + 8;
-      const left = Math.max(shellInset + half, Math.min(window.innerWidth - 8 - half, bounds.left + bounds.width / 2));
-      this.dropdownPosition = { top: bounds.bottom + 2, left, width };
+      if (position) this.dropdownPosition = position;
       this.openDropdown = key;
       if (key === 'year') this.dropdownYear = this.years[0] || new Date().getFullYear();
     },
@@ -266,7 +263,7 @@ export const useLibraryStore = defineStore('library', {
       this.favoriteCharacterSaving.push(normalized);
       try {
         const favorite = !this.isFavoriteCharacter(normalized);
-        this.favoriteCharacters = await invokeTauri<string[]>('set_character_favorite', { characterName: normalized, favorite });
+        this.favoriteCharacters = await libraryApi.setCharacterFavorite(normalized, favorite);
         if (!this.favoriteCharacters.length) this.favoriteCharacterMode = false;
         this.currentPage = 1;
       } catch (error) {
@@ -304,7 +301,7 @@ export const useLibraryStore = defineStore('library', {
       this.pageSize = nextSize;
       this.currentPage = preservePosition ? Math.floor(firstIndex / nextSize) + 1 : 1;
     },
-    coverUrl(path?: string): string {
+    coverUrl(path?: string | null): string {
       return path ? this.coverCache[path] || '' : '';
     },
     async loadCovers(paths: string[]): Promise<void> {
@@ -321,7 +318,7 @@ export const useLibraryStore = defineStore('library', {
         let batch!: Promise<void>;
         batch = (async () => {
           try {
-            const result = await invokeTauri<Array<[string, string]>>('load_cover_cache', { coverPaths: needed });
+            const result = await mediaApi.loadImages(needed);
             if (generation === this.coverGeneration) {
               this.coverCache = Object.assign({}, this.coverCache, Object.fromEntries(result));
             }
@@ -385,10 +382,10 @@ export const useLibraryStore = defineStore('library', {
       this.error = '';
       try {
         const [works, tags, studios, favoriteCharacters] = await Promise.all([
-          invokeTauri<WorkSummary[]>('get_all_works_with_tags'),
-          invokeTauri<TagSummary[]>('get_tags'),
-          invokeTauri<string[]>('get_studios'),
-          invokeTauri<string[]>('get_favorite_characters'),
+          libraryApi.listWorks(),
+          libraryApi.listTags(),
+          libraryApi.listStudios(),
+          libraryApi.listFavoriteCharacters(),
         ]);
         this.works = works || [];
         this.tags = tags || [];
@@ -426,7 +423,7 @@ export const useLibraryStore = defineStore('library', {
     },
     async showDetail(workId: number): Promise<void> {
       try {
-        const detail = await invokeTauri<WorkDetail>('get_work_detail', { workId });
+        const detail = await libraryApi.getWorkDetail(workId);
         if (!detail?.work) return;
         this.currentDetailWorkId = workId;
         this.currentDetail = detail;
@@ -445,7 +442,7 @@ export const useLibraryStore = defineStore('library', {
     },
     async openWorkFolder(path?: string): Promise<void> {
       if (!path) return;
-      try { await invokeTauri('open_folder', { path }); }
+      try { await systemApi.openFolder(path); }
       catch (error) { console.error('open folder failed:', error); }
     },
     async deleteWork(workId: number): Promise<void> {
@@ -454,7 +451,7 @@ export const useLibraryStore = defineStore('library', {
       const confirmed = await navigation.askConfirm('删除作品', `确定删除作品“${title}”？只会删除数据库记录，不会删除视频文件。`, '删除', true);
       if (!confirmed) return;
       try {
-        await invokeTauri('delete_work', { workId });
+        await libraryApi.deleteWork(workId);
         if (this.currentDetailWorkId === workId) {
           this.currentDetailWorkId = null;
           this.currentDetail = null;

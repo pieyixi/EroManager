@@ -39,6 +39,11 @@ function showGalleryMenu(event: MouseEvent, gid: number): void {
   library.closeDropdown();
   navigation.showContextMenu(event, "eh-work", gid);
 }
+function showEhHomeMenu(event: MouseEvent): void {
+  if ((event.target as Element | null)?.closest(".cover-card")) return;
+  library.closeDropdown();
+  navigation.showContextMenu(event, "eh-home");
+}
 watch(
   () => navigation.activePage,
   async (page) => {
@@ -69,7 +74,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
     :class="{ active: navigation.activePage === 'page-eh-library' }"
   >
     <div class="home eh-home">
-      <div ref="gridElement" class="cover-grid" :style="gridStyle">
+      <div ref="gridElement" class="cover-grid" :style="gridStyle" @contextmenu="showEhHomeMenu">
         <div v-if="library.loading" class="loading">加载书库...</div>
         <div v-else-if="library.error" class="empty-state">
           <h2>书库后端尚未连接</h2>
@@ -87,6 +92,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
           @contextmenu="showGalleryMenu($event, gallery.gid)"
         >
           <div class="cover-img">
+            <span v-if="gallery.source === 'hitomi'" class="eh-source-badge">Hitomi</span>
             <img
               v-if="library.coverUrl(gallery.cover_path)"
               :src="library.coverUrl(gallery.cover_path)"
@@ -159,5 +165,19 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
   margin-left: 6px;
   font-size: 11px;
   color: var(--soft);
+}
+.eh-source-badge {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 8px;
+  padding: 3px 7px;
+  border: 1px solid rgba(255,255,255,.35);
+  border-radius: 6px;
+  background: rgba(20,25,36,.66);
+  color: #fff !important;
+  font-size: 10px;
+  line-height: 1.2;
+  backdrop-filter: blur(8px);
 }
 </style>

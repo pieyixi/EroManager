@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import type { PlayerEpisode } from './app';
+import type { PlayerEpisode } from '../api/contracts/library';
 
 export type PlayerMode = 'detail' | 'archive';
 export type PlayerLoopMode = 'off' | 'one' | 'all';

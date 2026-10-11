@@ -5,6 +5,7 @@ import AppShell from './components/AppShell.vue';
 import ArchivePage from './components/ArchivePage.vue';
 import DetailPage from './components/DetailPage.vue';
 import EhLibraryPage from './components/EhLibraryPage.vue';
+import EhDownloadPage from './components/EhDownloadPage.vue';
 import EhReaderPage from './components/EhReaderPage.vue';
 import GlobalOverlays from './components/GlobalOverlays.vue';
 import HomePage from './components/HomePage.vue';
@@ -32,6 +33,7 @@ onBeforeUnmount(() => {
     <main class="app-main" :class="{ 'player-content': navigation.activePage === 'page-player', 'reader-content': navigation.activePage === 'page-eh-reader' }">
       <HomePage />
       <EhLibraryPage />
+      <EhDownloadPage />
       <EhReaderPage />
       <DetailPage />
       <PlayerPage />

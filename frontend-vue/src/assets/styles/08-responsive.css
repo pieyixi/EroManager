@@ -1,0 +1,47 @@
+  .maintenance-head{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0}
+  .maintenance-head>div{min-width:0;display:flex;align-items:baseline;gap:10px}
+  .maintenance-head h2{margin:0;color:var(--text-strong);font-size:18px;font-weight:700;white-space:nowrap}
+  .maintenance-head>div>span{min-width:0;overflow:hidden;color:var(--muted);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
+  .maintenance-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+  .maintenance-button{min-width:0;height:42px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel);display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font:600 13px/1 inherit;white-space:nowrap;cursor:pointer;transition:border-color .16s ease,background .16s ease,color .16s ease,transform .16s ease,box-shadow .16s ease}
+  .maintenance-button:hover:not(:disabled){border-color:var(--line-strong);background:var(--surface-hover);box-shadow:0 4px 12px rgba(27,39,64,.06);transform:translateY(-1px)}
+  .maintenance-button:disabled{opacity:.5;cursor:wait}
+  .maintenance-path{height:38px;font-size:12px}
+  .maintenance-message{height:18px;font-size:11px;line-height:18px}
+  :root[data-theme="dark"] .dashboard-library:hover{box-shadow:0 8px 25px rgba(0,0,0,.2)}
+
+  @media (max-height:900px) and (min-height:801px) and (min-width:900px){
+    .settings-console{padding-top:17px;padding-bottom:20px;grid-template-rows:42px auto;gap:12px}
+    .settings-shell{grid-template-rows:220px 420px;gap:12px}
+    .dashboard-library{padding:17px 20px}
+    .dashboard-card-body{height:136px;margin-top:8px}
+    .settings-operation-grid{grid-template-rows:210px 198px;gap:12px}
+    .settings-control-card{height:210px;padding:18px 20px;grid-template-rows:40px 38px minmax(40px,1fr) 22px;gap:9px}
+    .settings-maintenance-card{height:198px}
+    .maintenance-column{padding:16px 20px 13px;grid-template-rows:34px 40px 36px 17px;gap:8px}
+    .maintenance-button{padding:7px 10px}
+    .maintenance-path{height:34px}
+  }
+
+  @media (max-height:800px) and (min-width:900px){
+    .settings-console{padding-top:10px;padding-bottom:10px;grid-template-rows:30px auto;gap:7px}
+    .settings-shell{grid-template-rows:178px 358px;gap:8px}
+    .dashboard-library{padding:13px 17px}
+    .dashboard-card-body{height:111px;margin-top:7px}
+    .settings-operation-grid{grid-template-rows:190px 160px;gap:8px}
+    .settings-control-card{height:190px;padding:13px 16px;grid-template-rows:36px 34px minmax(38px,1fr) 20px;gap:6px}
+    .control-primary{height:34px!important}
+    .control-path-row .s-input,.control-path-row .btn-secondary{height:34px}
+    .settings-maintenance-card{height:160px}
+    .maintenance-column{padding:11px 16px 9px;grid-template-rows:28px 36px 30px 14px;gap:6px}
+    .maintenance-button{height:36px;font-size:12px}
+  }
+
+  @media (max-width:899px){
+    .settings-shell{grid-template-rows:auto auto}
+    .settings-dashboard,.settings-operation-grid{grid-template-columns:1fr;grid-template-rows:none}
+    .dashboard-library+ .dashboard-library{border-top:1px solid var(--line)}
+    .settings-control-card{height:auto;min-height:180px}
+    .settings-maintenance-card{grid-column:auto;height:auto;grid-template-columns:1fr}
+    .maintenance-column+ .maintenance-column{border-left:0;border-top:1px solid var(--line)}
+  }

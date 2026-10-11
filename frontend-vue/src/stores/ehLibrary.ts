@@ -1,9 +1,12 @@
 import { defineStore } from "pinia";
-import { invokeTauri } from "../api/tauri";
+import { ehApi } from "../api/commands/eh";
+import { mediaApi } from "../api/commands/media";
+import type { EhGallerySummary, EhLibraryOverview } from "../api/contracts/eh";
 import { useNavigationStore } from "./navigation";
+export type { EhGallerySummary, EhLibraryOverview } from "../api/contracts/eh";
 
 export type EhFilterKey = "category" | "artist" | "group" | "tag";
-export type EhSortKey = "time-desc" | "time-asc" | "name-asc" | "name-desc";
+export type EhSortKey = "time-desc" | "time-asc" | "name-asc" | "name-desc" | "added-desc" | "added-asc";
 export function ehCategoryLabel(value: number | string): string {
   return ({
     1: "Misc", 2: "Doujinshi", 4: "Manga", 8: "Artist CG",
@@ -11,22 +14,6 @@ export function ehCategoryLabel(value: number | string): string {
     128: "Asian Porn", 256: "Non-H", 512: "Western",
   } as Record<number, string>)[Number(value)] || String(value);
 }
-export interface EhGallerySummary {
-  gid: number;
-  title: string;
-  category: number | string;
-  artist: string[];
-  group: string[];
-  tags: string[];
-  artist_display?: string[];
-  group_display?: string[];
-  tags_display?: string[];
-  pages: number;
-  posted: string;
-  cover_path: string;
-  folder_path: string;
-}
-
 type EhTextFilterKey = Exclude<EhFilterKey, "category">;
 
 export function ehDisplayValues(gallery: EhGallerySummary, key: EhTextFilterKey): string[] {
@@ -41,13 +28,6 @@ export function ehDisplayValue(gallery: EhGallerySummary, key: EhTextFilterKey, 
   const index = source.indexOf(value);
   return index >= 0 ? ehDisplayValues(gallery, key)[index] || value : value;
 }
-export interface EhLibraryOverview {
-  root_path: string;
-  database_path: string;
-  total_count: number;
-  total_pages: number;
-}
-
 let coverGeneration = 0;
 const pendingCoverLoads = new Map<
   string,
@@ -95,6 +75,7 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
             !keyword ||
             [
               gallery.title,
+              gallery.source_id || String(Math.abs(gallery.gid)),
               String(gallery.category),
               ...gallery.artist,
               ...ehDisplayValues(gallery, "artist"),
@@ -109,6 +90,10 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
             ? right.posted.localeCompare(left.posted)
             : state.currentSort === "time-asc"
               ? left.posted.localeCompare(right.posted)
+              : state.currentSort === "added-desc"
+                ? right.added_at.localeCompare(left.added_at) || right.gid - left.gid
+                : state.currentSort === "added-asc"
+                  ? left.added_at.localeCompare(right.added_at) || left.gid - right.gid
               : state.currentSort === "name-desc"
                 ? right.title.localeCompare(left.title)
                 : left.title.localeCompare(right.title),
@@ -143,8 +128,8 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
       this.error = "";
       try {
         const [overview, galleries] = await Promise.all([
-          invokeTauri<EhLibraryOverview>("eh_get_library_overview"),
-          invokeTauri<EhGallerySummary[]>("eh_list_local_galleries"),
+          ehApi.getOverview(),
+          ehApi.listGalleries(),
         ]);
         this.overview = overview;
         this.galleries = galleries;
@@ -154,6 +139,18 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
       } finally {
         this.loading = false;
       }
+    },
+    clearCoverCache(): void {
+      coverGeneration += 1;
+      pendingCoverLoads.clear();
+      this.coverCache = {};
+    },
+    async refreshHome(): Promise<void> {
+      const navigation = useNavigationStore();
+      navigation.closeContextMenu();
+      navigation.showPage("page-eh-library");
+      this.clearCoverCache();
+      await this.load();
     },
     options(key: EhFilterKey): string[] {
       return [
@@ -221,6 +218,11 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
         this.currentSort === "name-asc" ? "name-desc" : "name-asc";
       this.currentPage = 1;
     },
+    toggleAddedSort(): void {
+      this.currentSort =
+        this.currentSort === "added-desc" ? "added-asc" : "added-desc";
+      this.currentPage = 1;
+    },
     updatePageSize(size: number): void {
       this.pageSize = Math.max(1, size);
       this.currentPage = Math.min(this.currentPage, this.totalPages);
@@ -249,10 +251,7 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
         let batch!: Promise<void>;
         batch = (async () => {
           try {
-            const loaded = await invokeTauri<Array<[string, string]>>(
-              "load_cover_cache",
-              { coverPaths: needed },
-            );
+            const loaded = await mediaApi.loadImages(needed);
             if (generation === coverGeneration) {
               this.coverCache = Object.assign(
                 {},
@@ -294,18 +293,14 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
       );
       if (!confirmed) return;
       try {
-        await invokeTauri(
-          deleteFolder ? "eh_delete_gallery_folder" : "eh_delete_gallery_record",
-          { gid },
-        );
+        if (deleteFolder) await ehApi.deleteFolder(gid);
+        else await ehApi.deleteRecord(gid);
         this.galleries = this.galleries.filter((item) => item.gid !== gid);
         const nextCache = { ...this.coverCache };
         delete nextCache[gallery.cover_path];
         this.coverCache = nextCache;
         this.currentPage = Math.min(this.currentPage, this.totalPages);
-        this.overview = await invokeTauri<EhLibraryOverview>(
-          "eh_get_library_overview",
-        );
+        this.overview = await ehApi.getOverview();
         void this.loadVisibleCovers();
       } catch (error) {
         this.error = `删除失败：${error instanceof Error ? error.message : String(error)}`;

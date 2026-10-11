@@ -1227,13 +1227,14 @@ dependencies = [
 
 [[package]]
 name = "hanime-manager"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "base64 0.22.1",
  "crc32fast",
  "imagesize",
  "libloading 0.8.9",
  "open",
+ "regex",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",

@@ -10,7 +10,7 @@ function sourceFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) return sourceFiles(path);
-    return /\.(?:ts|vue)$/.test(entry.name) && !entry.name.endsWith('.test.ts') ? [path] : [];
+    return /\.(?:ts|vue|css)$/.test(entry.name) && !entry.name.endsWith('.test.ts') ? [path] : [];
   });
 }
 
@@ -33,6 +33,12 @@ const metricPatterns = {
   ],
 };
 
+const boundaryPatterns = {
+  rawInvokeOutsideApi: /\binvokeTauri(?:<[^)]*>)?\s*\(/g,
+  apiStoreDependencies: /from\s+['"][^'"]*stores\//g,
+  storeDomWrites: /\b(?:document|window\.document)\s*\./g,
+};
+
 function countMatches(source, patterns) {
   return patterns.reduce((total, pattern) => total + [...source.matchAll(pattern)].length, 0);
 }
@@ -40,10 +46,18 @@ function countMatches(source, patterns) {
 const rows = sourceFiles(sourceRoot).map((path) => {
   const source = readFileSync(path, 'utf8');
   const metrics = Object.fromEntries(Object.entries(metricPatterns).map(([name, patterns]) => [name, countMatches(source, patterns)]));
-  return { file: relative(root, path).replaceAll('\\', '/'), ...metrics };
+  const file = relative(root, path).replaceAll('\\', '/');
+  const boundaryMetrics = {
+    rawInvokeOutsideApi: file.startsWith('src/api/') || file === 'src/features/player/mpv.ts'
+      ? 0
+      : countMatches(source, [boundaryPatterns.rawInvokeOutsideApi]),
+    apiStoreDependencies: file.startsWith('src/api/') ? countMatches(source, [boundaryPatterns.apiStoreDependencies]) : 0,
+    storeDomWrites: file.startsWith('src/stores/') ? countMatches(source, [boundaryPatterns.storeDomWrites]) : 0,
+  };
+  return { file, ...metrics, ...boundaryMetrics, lines: source.split(/\r?\n/).length, bytes: Buffer.byteLength(source) };
 });
 
-const totals = Object.fromEntries(Object.keys(metricPatterns).map((name) => [
+const totals = Object.fromEntries([...Object.keys(metricPatterns), ...Object.keys(boundaryPatterns)].map((name) => [
   name,
   rows.reduce((total, row) => total + row[name], 0),
 ]));
@@ -52,6 +66,16 @@ const activeRows = rows.filter((row) => Object.keys(metricPatterns).some((name) 
 console.table(activeRows);
 console.log('Architecture migration metrics:', totals);
 console.log('Final target:', contract.finalTarget);
+
+const sizeContract = contract.fileSize || { maxLines: 500, maxBytes: 60000, allowlist: {} };
+const largeFiles = rows.filter((row) => row.lines > sizeContract.maxLines || row.bytes > sizeContract.maxBytes);
+if (largeFiles.length) {
+  console.table(largeFiles.map(({ file, lines, bytes }) => ({ file, lines, bytes, allowlisted: Boolean(sizeContract.allowlist[file]) })));
+  const unallowlisted = largeFiles.filter(({ file }) => !sizeContract.allowlist[file]);
+  if (unallowlisted.length && enforce) {
+    throw new Error(`Large-file contract requires a boundary or explicit allowlist: ${unallowlisted.map(({ file }) => file).join(', ')}`);
+  }
+}
 
 if (enforce) {
   const failures = Object.entries(contract.currentMaximum)

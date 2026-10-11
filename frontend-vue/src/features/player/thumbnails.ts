@@ -1,8 +1,6 @@
-import { invokeTauri } from '../../api/tauri';
+import { playerApi } from '../../api/commands/player';
 import type { PlayerStore } from '../../stores/player';
 import { delay } from './mpv';
-
-interface CapturedThumbnail { time: number; image_data: string }
 
 export const playerThumbnailKey = (time: number): string => String(Math.round((Number(time) || 0) * 20) / 20);
 
@@ -91,7 +89,7 @@ export function createPlayerThumbnails(player: PlayerStore, formatTime: (seconds
 
   async function prime(videoPath: string, generation: number): Promise<void> {
     try {
-      const captured = await invokeTauri<CapturedThumbnail>('prime_video_thumbnail', { videoPath, generation });
+      const captured = await playerApi.primeThumbnail(videoPath, generation);
       if (generation !== player.thumbnailPrefetchGeneration || videoPath !== player.thumbnailVideoPath) return;
       store(0, captured.image_data, false);
       if (player.previewVisible && !player.previewImage) display(captured.image_data, 0);
@@ -128,7 +126,7 @@ export function createPlayerThumbnails(player: PlayerStore, formatTime: (seconds
   async function release(): Promise<void> {
     reset('');
     try {
-      await invokeTauri('release_video_thumbnail_decoders', { generation: player.thumbnailPrefetchGeneration });
+      await playerApi.releaseThumbnails(player.thumbnailPrefetchGeneration);
     } catch { /* Decoder teardown must not block leaving the player. */ }
   }
 
@@ -138,7 +136,7 @@ export function createPlayerThumbnails(player: PlayerStore, formatTime: (seconds
     for (const times of buildPlayerThumbnailPrefetchBatches(duration)) {
       if (generation !== player.thumbnailPrefetchGeneration || videoPath !== player.thumbnailVideoPath) return;
       try {
-        const frames = await invokeTauri<CapturedThumbnail[]>('prefetch_video_thumbnails', { videoPath, times, generation });
+        const frames = await playerApi.prefetchThumbnails(videoPath, times, generation);
         if (generation !== player.thumbnailPrefetchGeneration || videoPath !== player.thumbnailVideoPath) return;
         frames.forEach((frame) => store(frame.time, frame.image_data, false));
         if (player.previewVisible) {
@@ -240,12 +238,7 @@ export function createPlayerThumbnails(player: PlayerStore, formatTime: (seconds
     player.thumbnailInFlight = true;
     const started = performance.now();
     try {
-      const captured = await invokeTauri<CapturedThumbnail>('get_video_thumbnail', {
-        videoPath: pending.videoPath,
-        time: pending.time,
-        exact: pending.exact,
-        generation: pending.generation,
-      });
+      const captured = await playerApi.getThumbnail(pending.videoPath, pending.time, pending.exact, pending.generation);
       const latency = Math.max(0.02, Math.min(0.35, (performance.now() - started) / 1000));
       player.thumbnailLatency = player.thumbnailLatency * 0.72 + latency * 0.28;
       if (pending.generation !== player.thumbnailPrefetchGeneration || pending.videoPath !== player.thumbnailVideoPath) return;

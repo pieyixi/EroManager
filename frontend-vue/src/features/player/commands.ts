@@ -1,4 +1,4 @@
-import type { PlayerEpisode } from '../../stores/app';
+import type { PlayerEpisode } from '../../api/contracts/library';
 import type { PlayerMode } from '../../stores/player';
 import type { PlayerLayoutElements } from './layout';
 

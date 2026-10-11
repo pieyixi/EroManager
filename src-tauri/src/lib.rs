@@ -1,13 +1,10 @@
-include!("models.rs");
-include!("import.rs");
-include!("archive.rs");
-include!("duplicates.rs");
-include!("database.rs");
-include!("portable_library.rs");
-include!("library.rs");
-include!("media.rs");
-include!("thumbnail.rs");
-include!("sync_backup.rs");
-include!("library_console.rs");
-mod eh_library;
-include!("runtime.rs");
+mod eh;
+mod library;
+mod media;
+mod paths;
+mod player;
+mod runtime;
+mod shared;
+mod system;
+
+pub use runtime::run;

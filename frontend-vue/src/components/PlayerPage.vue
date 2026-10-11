@@ -2,14 +2,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue';
 import { playerCommands } from '../features/player/commands';
 import { formatPlayerSpeed, formatPlayerTime, playerEpisodeNumber, playerEpisodeSubtitle, playerFitModes } from '../features/player/model';
-import type { PlayerEpisode } from '../stores/app';
-import { useAppStore } from '../stores/app';
+import type { PlayerEpisode } from '../api/contracts/library';
+import { useArchiveStore } from '../stores/archive';
 import { useLibraryStore } from '../stores/library';
 import { useNavigationStore } from '../stores/navigation';
 import { usePlayerStore, type PlayerVideoHole } from '../stores/player';
 import ShellBackButton from './ShellBackButton.vue';
 
-const app = useAppStore();
+const archive = useArchiveStore();
 const library = useLibraryStore();
 const navigation = useNavigationStore();
 const player = usePlayerStore();
@@ -20,13 +20,13 @@ let descriptionObserver: ResizeObserver | null = null;
 
 const playlist = computed<PlayerEpisode[]>(() => player.mode === 'detail'
   ? (library.currentDetail?.episodes || []).filter((episode) => episode.video_path) as PlayerEpisode[]
-  : (app.archive.draft?.episode_list || []).filter((episode) => episode.video_path) as PlayerEpisode[]);
-const workTitle = computed(() => player.mode === 'detail' ? library.currentDetail?.work.title || '' : app.archive.draft?.title || '未命名作品');
-const studio = computed(() => player.mode === 'detail' ? library.currentDetail?.work.studio || '' : app.archive.draft?.studio || '');
-const description = computed(() => player.mode === 'detail' ? library.currentDetail?.work.description || '' : app.archive.draft?.synopsis || '');
+  : (archive.draft?.episode_list || []).filter((episode) => episode.video_path) as PlayerEpisode[]);
+const workTitle = computed(() => player.mode === 'detail' ? library.currentDetail?.work.title || '' : archive.draft?.title || '未命名作品');
+const studio = computed(() => player.mode === 'detail' ? library.currentDetail?.work.studio || '' : archive.draft?.studio || '');
+const description = computed(() => player.mode === 'detail' ? library.currentDetail?.work.description || '' : archive.draft?.synopsis || '');
 const characters = computed(() => player.mode === 'detail'
   ? (library.currentDetail?.characters || []).filter(Boolean)
-  : Object.keys(app.archive.draft?.characters || {}).sort((left, right) => Number(left) - Number(right)).map((key) => app.archive.draft?.characters[key] || '').filter(Boolean));
+  : Object.keys(archive.draft?.characters || {}).sort((left, right) => Number(left) - Number(right)).map((key) => archive.draft?.characters[key] || '').filter(Boolean));
 const currentEpisodeId = computed(() => Number(player.episode?.id));
 const currentEpisodeIndex = computed(() => playlist.value.findIndex((episode) => Number(episode.id) === currentEpisodeId.value));
 const nextDisabled = computed(() => currentEpisodeIndex.value < 0 || (currentEpisodeIndex.value >= playlist.value.length - 1 && player.loopMode !== 'all'));
@@ -40,7 +40,7 @@ function videoHoleStyle(rect: PlayerVideoHole): Record<string, string> {
 
 function episodeCover(episode: PlayerEpisode): string {
   const number = playerEpisodeNumber(episode);
-  return library.coverUrl(episode.cover_path) || (player.mode === 'archive' ? app.archive.episodeCoverData[number] || '' : '');
+  return library.coverUrl(episode.cover_path || undefined) || (player.mode === 'archive' ? archive.episodeCoverData[number] || '' : '');
 }
 
 function playEpisode(episode: PlayerEpisode): void {

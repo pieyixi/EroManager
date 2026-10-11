@@ -2,12 +2,12 @@
 
 This directory is the active Tauri frontend. It uses Vue 3, TypeScript, and Vite.
 
-Version 4.0 keeps Vue as the sole frontend runtime and adds the image-library and reader workflows behind the same typed Tauri command boundary. The previous HTML and JavaScript frontend is no longer part of the active build.
+Version 5.0 keeps Vue as the sole frontend runtime and adds queued downloads, source-specific history, and incremental retries behind the same typed Tauri command boundary. The previous HTML and JavaScript frontend is no longer part of the active build.
 
 ## Compatibility contract
 
 - The existing DOM ids, class names, visible text, and shared CSS remain unchanged.
-- Tauri commands and the Rust/libmpv backend are unchanged.
+- Rust commands are registered from explicit domain modules; the frontend and backend are checked against the same command contract.
 - Each existing page is now a Vue single-file component.
 - Pinia stores own application state; feature modules own library and player behavior.
 - `npm run check:parity` prevents accidental removal of the stable DOM contract and rejects inline HTML handlers.
@@ -40,11 +40,14 @@ Use the browser for layout, responsive behavior, themes, animation, filtering, n
 ## Structure
 
 - `src/components`: Vue page components.
-- `src/stores`: Pinia state and settings/archive workflows.
-- `src/features/library`: media-library navigation, filters, detail rendering, and library actions.
+- `src/api/contracts`: shared TypeScript DTOs for Rust and browser mock responses.
+- `src/api/commands`: typed command adapters; components and stores do not call `invoke` directly.
+- `src/stores`: Pinia state and domain workflows (`library`, `libraryConsole`, `archive`, `ehSettings`, `ehDownload`, `ehLibrary`, `ehReader`, `player`).
 - `src/features/player`: typed libmpv transport, native layout, thumbnail pipeline, and playback controller.
+- `src/features/theme`: the only owner of document-level theme transitions.
 - `src/runtime`: startup wiring and application-level events.
 - `scripts/ui-contract.json`: stable DOM ids used by CSS and native integration.
+- `scripts/check-command-contract.mjs`: verifies typed API, Rust registration, and browser mock parity.
 - `ARCHITECTURE.md`: final ownership rules, dependency direction, migration gates, and completion criteria.
 
 ## Validation

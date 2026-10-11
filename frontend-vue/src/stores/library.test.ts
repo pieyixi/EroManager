@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { WorkSummary } from './app';
+import type { WorkSummary } from '../api/contracts/library';
 import { calculateCoverGridLayout, coverPathsForWorks, filterWorks, paginationItems, worksForPage } from './library';
 
 const works: WorkSummary[] = [
@@ -12,7 +12,10 @@ const works: WorkSummary[] = [
     description: 'first work',
     search_aliases: ['阿尔法作品'],
     release_dates: ['2024-02', '2025-01'],
-    tags: [{ name: '校园', category: '场景' }],
+    cover_path: null,
+    folder_path: 'D:\\Library\\Alpha',
+    episode_count: 1,
+    tags: [{ id: 1, name: '校园', category: '场景' }],
   },
   {
     id: 2,
@@ -22,7 +25,11 @@ const works: WorkSummary[] = [
     studio: 'Studio B',
     description: 'second work',
     release_dates: ['2023-08'],
-    tags: [{ name: '纯爱', category: '剧情' }],
+    search_aliases: [],
+    cover_path: null,
+    folder_path: 'D:\\Library\\Beta',
+    episode_count: 1,
+    tags: [{ id: 2, name: '纯爱', category: '剧情' }],
   },
 ];
 
@@ -48,8 +55,8 @@ describe('library filtering', () => {
 
   it('shows only works containing a favorite character when favorite mode is active', () => {
     const characterWorks = [
-      { ...works[0], tags: [...(works[0].tags || []), { name: '枫', category: '人物' }] },
-      { ...works[1], tags: [...(works[1].tags || []), { name: '铃', category: '人物' }] },
+      { ...works[0], tags: [...works[0].tags, { id: 3, name: '枫', category: '人物' }] },
+      { ...works[1], tags: [...works[1].tags, { id: 4, name: '铃', category: '人物' }] },
     ];
     expect(filterWorks(characterWorks, {}, '', 'name-asc', ['枫'], true).map((work) => work.title)).toEqual(['Alpha']);
     expect(filterWorks(characterWorks, {}, 'beta', 'name-asc', ['枫'], true)).toEqual([]);

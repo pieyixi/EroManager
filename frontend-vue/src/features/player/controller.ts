@@ -1,7 +1,8 @@
 import { nextTick } from 'vue';
-import { invokeTauri } from '../../api/tauri';
-import type { ArchiveEpisode, PlayerEpisode } from '../../stores/app';
-import { useAppStore } from '../../stores/app';
+import { archiveApi } from '../../api/commands/archive';
+import { playerApi } from '../../api/commands/player';
+import type { ArchiveEpisode } from '../../api/contracts/archive';
+import type { PlayerEpisode } from '../../api/contracts/library';
 import { useArchiveStore } from '../../stores/archive';
 import { useLibraryStore } from '../../stores/library';
 import { useNavigationStore } from '../../stores/navigation';
@@ -11,13 +12,13 @@ import { createPlayerLayout } from './layout';
 import { formatPlayerTime, nextPlayerEpisodeIndex, parsePlayerTime, playerFitModes, playerEpisodeNumber } from './model';
 import { delay, initLibMpv, listenMpvEvents, mpvCommand, mpvPlugin, mpvSetProperty, safeMpvGetProperty } from './mpv';
 import { createPlayerThumbnails } from './thumbnails';
+import { createPlayerSeekController } from './seek';
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 export function installPlayerController(): () => void {
-  const app = useAppStore();
   const archive = useArchiveStore();
   const library = useLibraryStore();
   const navigation = useNavigationStore();
@@ -26,9 +27,6 @@ export function installPlayerController(): () => void {
   const thumbnails = createPlayerThumbnails(player, formatPlayerTime);
   let pollTimer: number | null = null;
   let pollStatusPromise: Promise<void> | null = null;
-  let keySeekTimer: number | null = null;
-  let keySeekInterval: number | null = null;
-  let pointerSeekWasPaused = false;
   let firstFrameWaiter: { fileLoaded: boolean; resolve: () => void } | null = null;
   let stopMpvEvents: (() => void) | null = null;
   const mpvEventsReady = listenMpvEvents((event) => {
@@ -50,25 +48,16 @@ export function installPlayerController(): () => void {
 
   function episodeList(): PlayerEpisode[] {
     if (player.mode === 'detail') return (library.currentDetail?.episodes || []).filter((episode) => episode.video_path) as PlayerEpisode[];
-    return (app.archive.draft?.episode_list || []).filter((episode) => episode.video_path) as PlayerEpisode[];
+    return (archive.draft?.episode_list || []).filter((episode) => episode.video_path) as PlayerEpisode[];
   }
 
   function workTitle(): string {
-    return player.mode === 'detail' ? library.currentDetail?.work.title || '' : app.archive.draft?.title || '未命名作品';
+    return player.mode === 'detail' ? library.currentDetail?.work.title || '' : archive.draft?.title || '未命名作品';
   }
 
   function stopPolling(): void {
     if (pollTimer !== null) window.clearInterval(pollTimer);
     pollTimer = null;
-  }
-
-  function stopKeySeek(): void {
-    if (keySeekTimer !== null) window.clearTimeout(keySeekTimer);
-    if (keySeekInterval !== null) window.clearInterval(keySeekInterval);
-    keySeekTimer = null;
-    keySeekInterval = null;
-    if (player.keySeekDirection > 0 && player.libmpvReady) void setSpeed(1);
-    player.keySeekDirection = 0;
   }
 
   function pollStatus(): Promise<void> {
@@ -259,7 +248,7 @@ export function installPlayerController(): () => void {
 
   async function returnFromPlayer(): Promise<void> {
     stopPolling();
-    stopKeySeek();
+    seekController.stopKeySeek();
     const thumbnailRelease = thumbnails.release();
     const mode = player.mode;
     if (player.fullscreen) await setFullscreen(false);
@@ -356,7 +345,7 @@ export function installPlayerController(): () => void {
       message('err', '时间格式应为 01:23 或 1:02:03');
       return false;
     }
-    await seekTo(seconds);
+    await seekController.seekTo(seconds);
     return true;
   }
 
@@ -381,97 +370,29 @@ export function installPlayerController(): () => void {
   }
 
   async function setFullscreen(value: boolean): Promise<void> {
-    try { await invokeTauri('set_player_fullscreen', { enabled: Boolean(value) }); }
+    try { await playerApi.setFullscreen(Boolean(value)); }
     catch (error) { message('err', `切换全屏失败: ${errorText(error)}`); return; }
     player.fullscreen = Boolean(value);
     player.controlsVisible = false;
     layout.scheduleSync();
   }
 
-  function beginKeySeek(direction: number): void {
-    if (navigation.activePage !== 'page-player' || !player.libmpvReady || player.keySeekDirection === direction) return;
-    stopKeySeek();
-    player.keySeekDirection = direction;
-    void seek(direction * 3);
-    keySeekTimer = window.setTimeout(() => {
-      keySeekTimer = null;
-      if (player.keySeekDirection !== direction) return;
-      if (direction > 0) void setSpeed(3);
-      else keySeekInterval = window.setInterval(() => { void seek(-3); }, 180);
-    }, 260);
-  }
-
-  function previewSeek(value: number): void {
-    player.currentTime = Math.max(0, Number(value) || 0);
-    if (!player.editingTime) player.timeInput = formatPlayerTime(player.currentTime);
-  }
-
-  function queueAbsoluteSeek(value: number, exact: boolean): void {
-    const duration = Number(player.duration) || 0;
-    let target = Math.max(0, Number(value) || 0);
-    if (duration > 0) target = Math.min(duration, target);
-    player.pendingSeek = { value: target, exact };
-    void drainSeekQueue();
-  }
-
-  async function drainSeekQueue(): Promise<void> {
-    if (player.seekCommandRunning || !player.libmpvReady) return;
-    player.seekCommandRunning = true;
-    try {
-      while (player.pendingSeek) {
-        const next = player.pendingSeek;
-        player.pendingSeek = null;
-        await mpvCommand('seek', [next.value, next.exact ? 'absolute+exact' : 'absolute+keyframes']);
-      }
-      if (!player.isSeeking) await pollStatus();
-    } catch (error) { message('err', errorText(error)); }
-    finally {
-      player.seekCommandRunning = false;
-      if (player.pendingSeek) void drainSeekQueue();
-    }
-  }
-
-  async function seekTo(value: number): Promise<void> {
-    previewSeek(value);
-    queueAbsoluteSeek(player.currentTime, true);
-  }
-
-  function beginPointerSeek(event: PointerEvent): void {
-    if (!player.libmpvReady) return;
-    event.preventDefault();
-    pointerSeekWasPaused = player.paused;
-    const target = thumbnails.show(event);
-    player.isSeeking = true;
-    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
-    previewSeek(target);
-    queueAbsoluteSeek(player.currentTime, false);
-  }
-
-  function movePointerSeek(event: PointerEvent): void {
-    const target = thumbnails.show(event);
-    if (!player.isSeeking) return;
-    event.preventDefault();
-    previewSeek(target);
-    queueAbsoluteSeek(player.currentTime, false);
-  }
-
-  function endPointerSeek(event: PointerEvent): void {
-    if (!player.isSeeking) return;
-    event.preventDefault();
-    const target = thumbnails.show(event);
-    if (event.type !== 'pointercancel') previewSeek(target);
-    player.isSeeking = false;
-    const element = event.currentTarget as HTMLElement;
-    if (element.hasPointerCapture?.(event.pointerId)) element.releasePointerCapture(event.pointerId);
-    element.blur();
-    queueAbsoluteSeek(player.currentTime, true);
-    void mpvSetProperty('pause', pointerSeekWasPaused).then(pollStatus).catch((error) => message('err', errorText(error)));
-    window.setTimeout(thumbnails.hide, 450);
-  }
-
   function adjustVolume(delta: number): void {
     void setVolume(player.volume + delta);
   }
+
+  const seekController = createPlayerSeekController({
+    player,
+    isPlayerActive: () => navigation.activePage === 'page-player',
+    thumbnails,
+    seekRelative: seek,
+    setSpeed,
+    pollStatus,
+    mpvCommand: (name, args = []) => mpvCommand(name, args),
+    mpvSetProperty: (name, value) => mpvSetProperty(name, value),
+    formatTime: formatPlayerTime,
+    message,
+  });
 
   async function toggleMute(): Promise<void> {
     try {
@@ -483,7 +404,7 @@ export function installPlayerController(): () => void {
   async function openExternal(): Promise<void> {
     const episode = currentEpisode();
     if (!episode) return;
-    try { await invokeTauri('play_video', { videoPath: episode.video_path }); }
+    try { await playerApi.playExternal(episode.video_path); }
     catch (error) { message('err', `外部播放失败: ${errorText(error)}`); }
   }
 
@@ -495,15 +416,15 @@ export function installPlayerController(): () => void {
     const time = Number(player.currentTime) || 0;
     message('info', `正在截取 ${formatPlayerTime(time)}...`);
     try {
-      const temp = await invokeTauri<{ path: string }>('prepare_temp_frame_capture');
+      const temp = await playerApi.prepareCapture();
       await delay(80);
       await mpvCommand('screenshot-to-file', [temp.path, 'video']);
-      const captured = await invokeTauri<{ image_data: string }>('read_image_data', { path: temp.path });
+      const captured = await playerApi.readImage(temp.path);
       const dirPath = archive.dirPath.trim();
       const episodeId = Number(episode.id || episode.number);
-      const savedPath = await invokeTauri<string>('save_archive_cover', { input: { dir_path: dirPath, image_data: captured.image_data, episode_id: episodeId } });
-      app.archive.episodeCoverData[episodeId] = captured.image_data;
-      const archiveEpisode = app.archive.draft?.episode_list.find((item: ArchiveEpisode) => Number(item.id) === episodeId);
+      const savedPath = await archiveApi.saveCover({ dir_path: dirPath, image_data: captured.image_data, episode_id: episodeId });
+      archive.episodeCoverData[episodeId] = captured.image_data;
+      const archiveEpisode = archive.draft?.episode_list.find((item: ArchiveEpisode) => Number(item.id) === episodeId);
       if (archiveEpisode) archiveEpisode.cover_path = savedPath;
       await library.reloadCoverCache(savedPath);
       message('info', '已截为本集封面');
@@ -529,11 +450,11 @@ export function installPlayerController(): () => void {
     cycleFitMode,
     setFullscreen,
     toggleFullscreen: () => setFullscreen(!player.fullscreen),
-    beginKeySeek,
-    stopKeySeek,
-    beginPointerSeek,
-    movePointerSeek,
-    endPointerSeek,
+    beginKeySeek: seekController.beginKeySeek,
+    stopKeySeek: seekController.stopKeySeek,
+    beginPointerSeek: seekController.beginPointerSeek,
+    movePointerSeek: seekController.movePointerSeek,
+    endPointerSeek: seekController.endPointerSeek,
     hideSeekPreview: thumbnails.hide,
     setVolume,
     adjustVolume,
@@ -549,7 +470,7 @@ export function installPlayerController(): () => void {
 
   return () => {
     stopPolling();
-    stopKeySeek();
+    seekController.stopKeySeek();
     thumbnails.dispose();
     layout.dispose();
     firstFrameWaiter = null;

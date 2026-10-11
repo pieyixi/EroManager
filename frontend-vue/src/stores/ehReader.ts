@@ -1,13 +1,9 @@
 import { defineStore } from "pinia";
-import { invokeTauri } from "../api/tauri";
-import type { EhGallerySummary } from "./ehLibrary";
+import { ehApi } from "../api/commands/eh";
+import { mediaApi } from "../api/commands/media";
+import type { EhGallerySummary, EhReaderPage } from "../api/contracts/eh";
 import { useNavigationStore } from "./navigation";
-export interface EhReaderPage {
-  index: number;
-  path: string;
-  width: number;
-  height: number;
-}
+export type { EhGallerySummary, EhReaderPage } from "../api/contracts/eh";
 export interface EhSpread {
   pages: EhReaderPage[];
   startIndex: number;
@@ -91,9 +87,7 @@ export const useEhReaderStore = defineStore("ehReader", {
       const generation = ++this.loadGeneration;
       useNavigationStore().showPage("page-eh-reader");
       try {
-        this.pages = await invokeTauri<EhReaderPage[]>("eh_get_gallery_pages", {
-          gid: gallery.gid,
-        });
+        this.pages = await ehApi.getPages(gallery.gid);
         if (generation !== this.loadGeneration) return;
         this.imageCache = {};
         await this.loadSpreadImages(this.spreadIndex, generation);
@@ -186,9 +180,7 @@ export const useEhReaderStore = defineStore("ehReader", {
     async loadPaths(paths: string[], generation: number): Promise<void> {
       const missing = [...new Set(paths)].filter((path) => path && !this.imageCache[path]);
       if (!missing.length) return;
-      const loaded = await invokeTauri<Array<[string, string]>>("load_cover_cache", {
-        coverPaths: missing,
-      });
+      const loaded = await mediaApi.loadImages(missing);
       if (generation !== this.loadGeneration) return;
       this.imageCache = { ...this.imageCache, ...Object.fromEntries(loaded) };
     },

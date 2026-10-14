@@ -17,6 +17,7 @@ export interface EhDownloadHistory {
   downloadedPages: number;
   failedPages: number[];
   failures: EhDownloadFailure[];
+  queuedAt: string;
   completedAt: string;
   error?: string;
 }
@@ -31,7 +32,20 @@ export interface DownloadQueueItem {
   totalPages: number;
   downloadedPages: number;
   coverPath: string;
+  queuedAt: string;
   pageIndices?: number[];
+}
+
+export type DownloadCard = {
+  key: string;
+  source: DownloadSource;
+  gid: number;
+  queuedAt: string;
+} & ({ kind: 'queue'; job: DownloadQueueItem } | { kind: 'history'; item: EhDownloadHistory });
+
+export function isDownloadComplete(item: EhDownloadHistory): boolean {
+  return !item.error && !item.failedPages.length && item.totalPages > 0
+    && item.downloadedPages === item.totalPages;
 }
 
 const HISTORY_KEY = 'eh-download-history';
@@ -78,6 +92,8 @@ function normalizeHistoryItem(item: unknown): EhDownloadHistory | null {
     folderPath: entry.folderPath, coverPath: typeof entry.coverPath === 'string' ? entry.coverPath : '',
     totalPages: totalPages as number, downloadedPages: downloadedPages as number,
     failedPages: failures.map((failure) => failure.page), failures, completedAt: entry.completedAt,
+    queuedAt: typeof entry.queuedAt === 'string' && Number.isFinite(Date.parse(entry.queuedAt))
+      ? entry.queuedAt : entry.completedAt,
     error: typeof entry.error === 'string' ? entry.error : undefined,
   };
 }
@@ -115,6 +131,18 @@ export const useEhDownloadStore = defineStore('ehDownload', {
     hitomiQueue: (state): DownloadQueueItem[] => state.queue.filter((item) => item.source === 'hitomi'),
     ehHistory: (state): EhDownloadHistory[] => state.history.filter((item) => item.source === 'eh'),
     hitomiHistory: (state): EhDownloadHistory[] => state.history.filter((item) => item.source === 'hitomi'),
+    cards: (state): DownloadCard[] => {
+      const queuedKeys = new Set(state.queue.map((job) => job.key));
+      const cards: DownloadCard[] = state.history
+        .filter((item) => !queuedKeys.has(workKey(item.source, Math.abs(item.gid))))
+        .map((item) => ({ kind: 'history', key: workKey(item.source, Math.abs(item.gid)),
+          source: item.source, gid: item.gid, queuedAt: item.queuedAt, item }));
+      cards.push(...state.queue.map((job): DownloadCard => ({ kind: 'queue', key: job.key,
+        source: job.source, gid: job.source === 'eh' ? job.id : -job.id, queuedAt: job.queuedAt, job })));
+      // 卡片按堆栈显示：新加入的在最前，旧的往后；状态变化和重试不换位，下载仍按 FIFO 执行。
+      return cards.sort((left, right) => Date.parse(right.queuedAt) - Date.parse(left.queuedAt)
+        || left.key.localeCompare(right.key));
+    },
   },
   actions: {
     persistHistory(): void {
@@ -129,6 +157,12 @@ export const useEhDownloadStore = defineStore('ehDownload', {
       if (source === 'eh') { this.ehGidInput = ''; this.ehTokenInput = ''; }
       else this.hitomiIdInput = '';
       this.messages[source] = null;
+    },
+    nextQueuedAt(): string {
+      const latest = Math.max(0, ...this.history.map((item) => Date.parse(item.queuedAt)),
+        ...this.queue.map((job) => Date.parse(job.queuedAt)));
+      // 同毫秒连续加入或系统时钟回拨时，新作品也必须排在已有卡片之前。
+      return new Date(Math.max(Date.now(), latest + 1)).toISOString();
     },
     enqueue(source: DownloadSource, id: number, token = '', pageIndices?: number[]): boolean {
       if (!Number.isSafeInteger(id) || id <= 0 || (source === 'eh' && !token.trim())) return false;
@@ -147,6 +181,7 @@ export const useEhDownloadStore = defineStore('ehDownload', {
         status: 'queued', progressPercent: progress, progressText: '等待下载',
         totalPages: previous?.totalPages || 0, downloadedPages: previous?.downloadedPages || 0,
         coverPath: previous?.coverPath || '', pageIndices: selected,
+        queuedAt: previous?.queuedAt || this.nextQueuedAt(),
       });
       this.messages[source] = { kind: 'success', text: `已将 ${id} 加入队列` };
       void this.processQueue();
@@ -165,6 +200,22 @@ export const useEhDownloadStore = defineStore('ehDownload', {
       const id = positiveId(this.hitomiIdInput);
       if (!id) { this.messages.hitomi = { kind: 'err', text: '请输入有效的 Hitomi ID' }; return; }
       if (this.enqueue('hitomi', id)) this.hitomiIdInput = '';
+    },
+    async openCompletedGallery(gid: number): Promise<void> {
+      const item = this.history.find((entry) => entry.gid === gid);
+      if (!item || !isDownloadComplete(item)
+        || this.queue.some((job) => job.key === workKey(item.source, Math.abs(gid)))) return;
+      const library = useEhLibraryStore();
+      // 保留带符号的内部 GID，避免 Eh 与 Hitomi 同号作品跳错；历史不充当作品详情。
+      let gallery = library.galleries.find((entry) => entry.gid === gid);
+      if (!gallery) {
+        await library.load();
+        gallery = library.galleries.find((entry) => entry.gid === gid);
+      }
+      if (gallery) library.showDetail(gallery);
+      else this.messages[item.source] = {
+        kind: 'err', text: library.error || '当前 本子库中找不到该作品，请确认库目录和入库记录',
+      };
     },
     retryHistoryPages(item: EhDownloadHistory, pages: number[] = item.failedPages): void {
       const current = this.history.find((entry) => entry.gid === item.gid);
@@ -212,7 +263,7 @@ export const useEhDownloadStore = defineStore('ehDownload', {
         gid: result.gid, source: job.source, title: result.title, folderPath: result.folder_path,
         coverPath: result.cover_path || previous?.coverPath || '', totalPages: result.total_pages,
         downloadedPages, failedPages: unique.map((failure) => failure.page), failures: unique,
-        completedAt: new Date().toISOString(),
+        queuedAt: job.queuedAt, completedAt: new Date().toISOString(),
         error: !result.meta_path && !unique.length ? '作品尚未完整入库，可重新尝试' : undefined,
       };
       this.upsertHistory(entry);
@@ -226,7 +277,7 @@ export const useEhDownloadStore = defineStore('ehDownload', {
         folderPath: previous?.folderPath || '', coverPath: previous?.coverPath || '',
         totalPages: previous?.totalPages || 0, downloadedPages: previous?.downloadedPages || 0,
         failedPages: previous?.failedPages || [], failures: previous?.failures || [],
-        completedAt: new Date().toISOString(), error: errorText(error),
+        queuedAt: job.queuedAt, completedAt: new Date().toISOString(), error: errorText(error),
       };
       this.upsertHistory(entry);
       return entry;
@@ -302,7 +353,7 @@ export const useEhDownloadStore = defineStore('ehDownload', {
       const confirmed = await useNavigationStore().askConfirm(
         deleteFolder ? '删除本地作品' : '移除数据库记录',
         deleteFolder ? `确定永久删除“${item.title}”的整个本地文件夹？其中所有图片和 data 资料都会被删除，无法撤销。`
-          : `确定仅从 Eh 数据库移除“${item.title}”？本地文件夹及图片不会被删除。`,
+          : `确定仅从 本子数据库移除“${item.title}”？本地文件夹及图片不会被删除。`,
         deleteFolder ? '删除文件夹' : '移除记录', true,
       );
       if (!confirmed) return;

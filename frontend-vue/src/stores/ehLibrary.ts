@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ehApi } from "../api/commands/eh";
 import { mediaApi } from "../api/commands/media";
 import type { EhGallerySummary, EhLibraryOverview } from "../api/contracts/eh";
-import { useNavigationStore } from "./navigation";
+import { type DetailReturnPage, useNavigationStore } from "./navigation";
 export type { EhGallerySummary, EhLibraryOverview } from "../api/contracts/eh";
 
 export type EhFilterKey = "category" | "artist" | "group" | "tag";
@@ -42,7 +42,7 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
     search: "",
     activeFilters: {} as Record<EhFilterKey, string[]>,
     openDropdown: null as EhFilterKey | null,
-    currentSort: "time-desc" as EhSortKey,
+    currentSort: "added-desc" as EhSortKey,
     currentPage: 1,
     pageSize: 20,
     loading: false,
@@ -287,7 +287,7 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
         deleteFolder ? "删除本地作品" : "移除数据库记录",
         deleteFolder
           ? `确定永久删除“${gallery.title}”的整个本地文件夹？其中所有图片和 data 资料都会被删除，无法撤销。`
-          : `确定仅从 Eh 数据库移除“${gallery.title}”？本地文件夹及图片不会被删除。`,
+          : `确定仅从 本子数据库移除“${gallery.title}”？本地文件夹及图片不会被删除。`,
         deleteFolder ? "删除文件夹" : "移除记录",
         true,
       );
@@ -306,11 +306,11 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
         this.error = `删除失败：${error instanceof Error ? error.message : String(error)}`;
       }
     },
-    showDetail(gallery: EhGallerySummary): void {
+    showDetail(gallery: EhGallerySummary, returnPage?: DetailReturnPage): void {
       this.currentGallery = gallery;
       const navigation = useNavigationStore();
       navigation.detailSource = "eh";
-      navigation.showPage("page-detail");
+      navigation.showPage("page-detail", returnPage);
     },
   },
 });

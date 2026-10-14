@@ -51,7 +51,7 @@ export const useEhSettingsStore = defineStore('ehSettings', {
     async saveSettings(): Promise<void> {
       if (this.ehCredentialsSaving) return;
       const rootPath = this.ehLibraryPath.trim();
-      if (!rootPath) { this.ehCredentialsMessage = { kind: 'err', text: '请先填写 Eh 库目录' }; return; }
+      if (!rootPath) { this.ehCredentialsMessage = { kind: 'err', text: '请先填写 本子库目录' }; return; }
       this.ehCredentialsSaving = true;
       this.ehCredentialsMessage = { kind: 'info', text: '正在保存...' };
       try {

@@ -34,7 +34,7 @@ const mediaStatus = computed(() => {
   return '尚未扫描';
 });
 const ehStatus = computed(() => {
-  if (eh.ehScanning) return eh.ehProgressText || '正在扫描 Eh 库';
+  if (eh.ehScanning) return eh.ehProgressText || '正在扫描 本子库';
   if (ehIssueCount.value) return `发现 ${ehIssueCount.value} 项需要检查`;
   if (eh.ehScanCompleted) return '上次扫描完成，未发现问题';
   return '尚未扫描';
@@ -53,7 +53,7 @@ const ehRingStyle = computed(() => {
   });
   return { background: stops.length ? `conic-gradient(${stops.join(',')})` : 'var(--track)' };
 });
-const drawerTitle = computed(() => ({ media: '媒体库扫描结果', eh: 'Eh 库扫描结果', duplicates: '重复作品检查' }[activeDrawer.value || 'media']));
+const drawerTitle = computed(() => ({ media: '媒体库扫描结果', eh: '本子库扫描结果', duplicates: '重复作品检查' }[activeDrawer.value || 'media']));
 
 function openUnarchived(): void { void archive.openUnarchivedPage(); }
 function groupItems(key: ScanGroupKey): ConsoleItem[] { return settings.items(key); }
@@ -104,7 +104,7 @@ watch(
             </div>
           </article>
           <article class="dashboard-library dashboard-eh">
-            <header class="dashboard-card-head"><div><i class="dashboard-status-dot" :class="{ warning: !ehConnected }"></i><h2>Eh 库</h2><span>{{ ehConnected ? '已连接' : '未连接' }}</span></div><span class="dashboard-path">{{ eh.ehLibraryPath || '尚未设置目录' }}</span></header>
+            <header class="dashboard-card-head"><div><i class="dashboard-status-dot" :class="{ warning: !ehConnected }"></i><h2>本子库</h2><span>{{ ehConnected ? '已连接' : '未连接' }}</span></div><span class="dashboard-path">{{ eh.ehLibraryPath || '尚未设置目录' }}</span></header>
             <div class="dashboard-card-body eh-dashboard-body">
               <div class="dashboard-ring eh-category-ring" :style="ehRingStyle"><div class="dashboard-ring-inner"><strong>{{ eh.ehDashboard.total_count }}</strong><span>部作品</span></div></div>
               <div class="eh-category-legend"><div v-for="(item, index) in eh.ehDashboard.categories" :key="item.category" class="eh-category-item"><i :style="{ background: ehCategoryColors[index % ehCategoryColors.length] }"></i><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div></div>
@@ -122,7 +122,7 @@ watch(
             <div id="libraryMsg" class="visually-hidden"><span v-if="settings.libraryMessage">{{ settings.libraryMessage.text }}</span></div>
           </article>
           <article class="settings-control-card library-control-card">
-            <header class="control-card-head"><div><h2>Eh 库</h2><span>本子作品目录</span></div><button class="btn-primary control-primary" :disabled="eh.ehScanning" @click="eh.scanLibrary">{{ eh.ehScanning ? '扫描中' : '扫描变化' }}</button></header>
+            <header class="control-card-head"><div><h2>本子库</h2><span>本子作品目录</span></div><button class="btn-primary control-primary" :disabled="eh.ehScanning" @click="eh.scanLibrary">{{ eh.ehScanning ? '扫描中' : '扫描变化' }}</button></header>
             <div class="control-path-row"><input v-model="eh.ehLibraryPath" class="s-input" type="text"><button class="btn-secondary" @click="eh.bindLibrary">更改目录</button></div>
             <div class="control-card-state" :class="{ actionable: ehIssueCount }"><span class="state-line"><i :class="{ busy: eh.ehScanning, warning: ehIssueCount }"></i>{{ ehStatus }}</span><button v-if="ehIssueCount" class="state-action" @click="openDrawer('eh')">查看结果 <span>›</span></button></div>
             <div class="compact-progress" :class="{ active: eh.ehProgressActive }" :aria-hidden="eh.ehProgressActive ? 'false' : 'true'"><div class="compact-progress-track"><span :style="{ width: `${eh.ehProgressPercent}%` }"></span></div><span>{{ eh.ehProgressText }}</span></div>
@@ -134,7 +134,7 @@ watch(
               <input v-model="settings.backupPath" class="s-input maintenance-path" type="text" id="dbFilePath" placeholder="备份或恢复路径，例如 D:\Ark\hanime-data-backup.zip"><div id="dbMsg" class="maintenance-message">{{ settings.databaseMessage?.text || '' }}</div>
             </section>
             <section class="maintenance-column">
-              <header class="maintenance-head"><div><h2>Eh 数据</h2><span>本子索引、资料包与访问凭据</span></div></header>
+              <header class="maintenance-head"><div><h2>本子数据</h2><span>本子索引、资料包与访问凭据</span></div></header>
               <div class="maintenance-actions"><button class="maintenance-button" @click="cookieModalVisible = true">Cookie 设置</button><button class="maintenance-button eh-download-trigger" :class="{ 'is-downloading': download.queue.length > 0 }" :aria-busy="download.downloading" @click="navigation.showPage('page-eh-download')">作品下载<span v-if="download.queue.length" class="eh-download-trigger-dot" aria-hidden="true"></span></button></div>
             </section>
           </article>
@@ -148,7 +148,7 @@ watch(
         <template v-else-if="activeDrawer === 'eh'"><div class="drawer-summary"><i class="dashboard-status-dot warning"></i><strong>{{ ehIssueCount }} 项需要检查</strong></div><div v-for="(issue, index) in eh.ehScanErrors" :key="issue.folder_path" class="drawer-result-item"><div><strong>{{ issue.title }}</strong><span>{{ issue.reason }}</span></div><button class="text-action" @click="eh.openScanIssue(index)">打开文件夹</button></div></template>
         <template v-else><div v-if="!settings.duplicates.length" class="drawer-empty">{{ settings.duplicateMessage?.text || '尚未进行重复作品检查' }}</div><div v-for="(group, groupIndex) in settings.duplicates" :key="groupIndex" class="duplicate-group"><div class="duplicate-group-title">重复组 {{ groupIndex + 1 }}</div><div v-for="item in group.items" :key="item.folder_path" class="duplicate-item"><strong>{{ item.title }}</strong><span>{{ item.source }} / {{ item.video_count }} 集 / {{ duplicateSize(item.total_size) }}</span><small>{{ item.folder_path }}</small></div></div></template>
       </div></aside></div>
-      <div class="modal-mask" :class="{ active: cookieModalVisible }" @click.self="cookieModalVisible = false"><div class="modal eh-cookie-modal" role="dialog" aria-modal="true" aria-label="Eh Cookie 设置"><div class="modal-title">Eh Cookie 设置</div><div class="modal-copy">用于请求作品元数据，仅保存在软件本体旁的 Eh 数据库中。</div><div class="eh-cookie-fields"><label><span>ipb_member_id</span><input v-model="eh.ehMemberId" class="s-input" type="password" autocomplete="off"></label><label><span>ipb_pass_hash</span><input v-model="eh.ehPassHash" class="s-input" type="password" autocomplete="off"></label><label><span>igneous</span><input v-model="eh.ehIgneous" class="s-input" type="password" autocomplete="off"></label></div><div v-if="eh.ehCredentialsMessage" class="settings-msg" :class="eh.ehCredentialsMessage.kind">{{ eh.ehCredentialsMessage.text }}</div><div class="modal-actions"><button class="btn-secondary" @click="cookieModalVisible = false">取消</button><button class="btn-primary" :disabled="eh.ehCredentialsSaving" @click="saveEhCookies">保存</button></div></div></div>
+      <div class="modal-mask" :class="{ active: cookieModalVisible }" @click.self="cookieModalVisible = false"><div class="modal eh-cookie-modal" role="dialog" aria-modal="true" aria-label="Eh Cookie 设置"><div class="modal-title">Eh Cookie 设置</div><div class="modal-copy">用于请求作品元数据，仅保存在软件本体旁的 本子数据库中。</div><div class="eh-cookie-fields"><label><span>ipb_member_id</span><input v-model="eh.ehMemberId" class="s-input" type="password" autocomplete="off"></label><label><span>ipb_pass_hash</span><input v-model="eh.ehPassHash" class="s-input" type="password" autocomplete="off"></label><label><span>igneous</span><input v-model="eh.ehIgneous" class="s-input" type="password" autocomplete="off"></label></div><div v-if="eh.ehCredentialsMessage" class="settings-msg" :class="eh.ehCredentialsMessage.kind">{{ eh.ehCredentialsMessage.text }}</div><div class="modal-actions"><button class="btn-secondary" @click="cookieModalVisible = false">取消</button><button class="btn-primary" :disabled="eh.ehCredentialsSaving" @click="saveEhCookies">保存</button></div></div></div>
     </Teleport>
   </div>
 </template>

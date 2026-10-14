@@ -1,110 +1,83 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { calculateCoverGridLayout, useLibraryStore } from '../stores/library';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useNavigationStore } from '../stores/navigation';
+import { useLibraryStore } from '../stores/library';
+import { useEhLibraryStore } from '../stores/ehLibrary';
+import { type DrawPhase, type DrawSelection, drawBusy, useHomeStore } from '../stores/home';
+import { decodeDrawImages } from '../features/home/images';
+import HomeDrawCard from './HomeDrawCard.vue';
+import HomeHandDeck from './HomeHandDeck.vue';
+// 暂停左上问候区，保留图标组件与原有文案以便后续恢复。
+// import HomeSkyIcon from './home/HomeSkyIcon.vue';
+import { useHomeHandStore, type HandCard } from '../stores/homeHand';
+import { useCardTransfer } from '../features/home/useCardTransfer';
 
-const library = useLibraryStore();
 const navigation = useNavigationStore();
-const gridElement = ref<HTMLElement | null>(null);
-const pageJump = ref(1);
-const gridColumns = ref(1);
-const gridCardWidth = ref(158);
-let resizeObserver: ResizeObserver | null = null;
-const gridStyle = computed(() => ({
-  '--grid-columns': String(gridColumns.value),
-  '--grid-card-width': `${gridCardWidth.value}px`,
-}));
-
-function measureGrid(preservePosition = true): void {
-  const grid = gridElement.value;
-  if (!grid) return;
-  const style = window.getComputedStyle(grid);
-  const paddingX = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
-  const paddingY = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
-  const layout = calculateCoverGridLayout(grid.clientWidth, grid.clientHeight, paddingX, paddingY);
-  gridColumns.value = layout.columns;
-  gridCardWidth.value = layout.cardWidth;
-  library.updatePageSize(layout.columns * layout.rows, preservePosition);
-}
-
-function imageError(event: Event): void {
-  (event.currentTarget as HTMLImageElement).style.display = 'none';
-}
-
-function showWorkMenu(event: MouseEvent, workId?: number): void {
-  if (!workId) return;
-  library.closeDropdown();
-  navigation.showContextMenu(event, 'work', workId);
-}
-
-function showHomeMenu(event: MouseEvent): void {
-  if ((event.target as Element | null)?.closest('.cover-card')) return;
-  library.closeDropdown();
-  navigation.showContextMenu(event, 'home');
-}
-
-async function jumpToPage(): Promise<void> {
-  await library.goPage(pageJump.value);
-}
-
-watch(() => library.currentPage, (page) => { pageJump.value = page; }, { immediate: true });
-watch(
-  () => [navigation.activePage, ...library.pagedWorks.map((work) => work.cover_path || '')],
-  ([page]) => {
-    if (page === 'page-home') void library.loadVisibleCovers();
-  },
-  { immediate: true, flush: 'post' },
+const library = useLibraryStore();
+const books = useEhLibraryStore();
+const home = useHomeStore();
+const hand = useHomeHandStore();
+const handDeck = ref<InstanceType<typeof HomeHandDeck> | null>(null);
+const handExpanded = ref(false);
+const handError = ref('');
+const receipt = ref(0);
+const { transfer, overTarget, ghostStyle, down, move, up, cancel, lostCapture, allowDraw } = useCardTransfer(
+  () => handDeck.value,
+  (source, selection) => { hand.add(source, selection); handExpanded.value = false; handError.value = ''; receipt.value += 1; },
 );
-watch(() => navigation.activePage, async (page) => {
-  if (page !== 'page-home') return;
-  await nextTick();
-  measureGrid(true);
+function prepareImages(selection: DrawSelection): Promise<void> { return decodeDrawImages([selection.cover, ...selection.previews.map((item) => item.image)]); }
+function drawMedia(event: MouseEvent): void { if (allowDraw(event)) void home.draw('media', prepareImages); }
+function drawBook(event: MouseEvent): void { if (allowDraw(event)) void home.draw('book', prepareImages); }
+function dragMedia(event: PointerEvent): void { handExpanded.value = false; down('media', home.media.current, event); }
+function dragBook(event: PointerEvent): void { handExpanded.value = false; down('book', home.book.current, event); }
+function mediaAnimationEnd(phase: DrawPhase): void { home.finishAnimation('media', phase); }
+function bookAnimationEnd(phase: DrawPhase): void { home.finishAnimation('book', phase); }
+function mediaDetail(): void { void home.openDetail('media'); }
+function bookDetail(): void { void home.openDetail('book'); }
+function closeHand(): void { handExpanded.value = false; handError.value = ''; }
+function escape(): void { cancel(); closeHand(); }
+async function openHand(card: HandCard): Promise<void> {
+  handError.value = '';
+  await home.openDetail(card.source, card.id);
+  if (navigation.activePage === 'page-home') handError.value = home[card.source].error;
+}
+watch(() => [navigation.activePage, library.works, books.galleries, library.loading, books.loading], () => {
+  if (navigation.activePage === 'page-home') home.ensureSelections(prepareImages);
+  else { home.cancelDraws(); cancel(); }
+}, { immediate: true });
+watch(() => [library.works.map((work) => work.id), books.galleries.map((gallery) => gallery.gid), library.loading, books.loading], () => {
+  if (!library.loading && !books.loading) hand.reconcile(library.works.map((work) => work.id), books.galleries.map((gallery) => gallery.gid));
 });
-
+watch(() => hand.current?.key, () => { handError.value = ''; });
+onBeforeUnmount(() => home.cancelDraws());
 onMounted(() => {
-  if (gridElement.value) {
-    resizeObserver = new ResizeObserver(() => measureGrid(true));
-    resizeObserver.observe(gridElement.value);
-  }
-  measureGrid(false);
-});
-
-onBeforeUnmount(() => {
-  resizeObserver?.disconnect();
+  if (!books.overview && !books.loading) void books.load();
 });
 </script>
 
 <template>
-  <div class="page" :class="{ active: navigation.activePage === 'page-home' }" id="page-home">
-    <div class="home">
-      <div ref="gridElement" class="cover-grid" id="coverGrid" :style="gridStyle" @contextmenu="showHomeMenu">
-        <div v-if="library.loading" class="loading">&#128269; 加载作品数据...</div>
-        <div v-else-if="library.disconnected" class="empty-state"><h2>Tauri 未连接</h2><p>请在 Tauri 窗口中打开此页面</p></div>
-        <div v-else-if="library.error" class="empty-state"><h2>加载失败</h2><p>{{ library.error }}</p></div>
-        <div v-else-if="!library.pagedWorks.length" class="empty-state"><h2>暂无作品</h2><p>在设置中扫描目录导入作品</p></div>
-        <div v-for="work in library.pagedWorks" :key="work.id" class="cover-card" :data-work-id="work.id" @click="library.showDetail(Number(work.id))" @contextmenu="showWorkMenu($event, Number(work.id))">
-          <div class="cover-img">
-            <img v-if="library.coverUrl(work.cover_path)" :src="library.coverUrl(work.cover_path)" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0" @error="imageError">
-            <span style="font-size:36px;color:#bbb">&#127916;</span>
-            <div class="cover-hover">
-              <div class="ch-title">{{ work.title }}</div>
-              <div class="ch-meta">{{ work.studio || '未知制作商' }} / {{ work.year }}-{{ String(work.month).padStart(2, '0') }} / {{ Number(work.episode_count) || 0 }}集</div>
-            </div>
-          </div>
-          <div class="cover-title">{{ work.title }}</div>
-        </div>
-      </div>
-      <div class="pagination" id="pagination">
-        <button class="page-btn" :disabled="library.currentPage <= 1" @click="library.goPage(library.currentPage - 1)">&#8249;</button>
-        <template v-for="(item, index) in library.pageItems" :key="`${item}-${index}`">
-          <span v-if="item === 'ellipsis'" class="page-dot">...</span>
-          <button v-else class="page-num" :class="{ active: item === library.currentPage }" @click="library.goPage(item)">{{ item }}</button>
-        </template>
-        <button class="page-btn" :disabled="library.currentPage >= library.totalPages" @click="library.goPage(library.currentPage + 1)">&#8250;</button>
-        <input v-model.number="pageJump" type="number" id="pageJump" min="1" :max="library.totalPages" style="width:48px;height:28px;border:1px solid #d1d1d6;border-radius:5px;font-size:12px;text-align:center;margin:0 4px" @keydown.enter="jumpToPage">
-        <span style="font-size:12px;color:#999">共 {{ library.filteredWorks.length }} 部</span>
-      </div>
+  <div id="page-home" class="page" :class="{ active: navigation.activePage === 'page-home' }" aria-label="首页" @keydown.esc.stop.prevent="escape">
+    <!-- 左上问候区暂时关闭，保留原实现：
+    <div class="home-greeting" aria-label="首页问候"><span>你好</span><HomeSkyIcon :active="navigation.activePage === 'page-home'" /><span>随便翻翻</span></div>
+    -->
+    <div class="home-draw-layout">
+      <HomeDrawCard label="里番" kind="media" :selection="home.media.current" :retiring="home.media.retiring" :phase="home.media.phase" :busy="drawBusy(home.media)" :loading="library.loading" :error="home.media.error || library.error"
+        :dragging="transfer?.source === 'media' && (transfer.phase === 'dragging' || transfer.phase === 'returning')"
+        @draw="drawMedia" @animation-end="mediaAnimationEnd" @detail="mediaDetail" @card-pointer-down="dragMedia" @card-pointer-move="move" @card-pointer-up="up" @card-pointer-cancel="lostCapture" />
+      <HomeDrawCard label="本子" kind="book" :selection="home.book.current" :retiring="home.book.retiring" :phase="home.book.phase" :busy="drawBusy(home.book)" :loading="books.loading" :error="home.book.error || books.error"
+        :dragging="transfer?.source === 'book' && (transfer.phase === 'dragging' || transfer.phase === 'returning')"
+        @draw="drawBook" @animation-end="bookAnimationEnd" @detail="bookDetail" @card-pointer-down="dragBook" @card-pointer-move="move" @card-pointer-up="up" @card-pointer-cancel="lostCapture" />
     </div>
-
+    <Transition :name="hand.cards.length ? 'home-hand-shade' : ''">
+      <div v-if="handExpanded" class="home-hand-backdrop" aria-hidden="true" @pointerdown="closeHand" />
+    </Transition>
+    <HomeHandDeck ref="handDeck" v-model:expanded="handExpanded" :active="navigation.activePage === 'page-home'" :dragging="transfer?.phase === 'dragging'" :over="overTarget" :receipt="receipt"
+      :opening="home.media.openingDetail || home.book.openingDetail" :error="handError" @open="openHand" />
+    <Teleport to="body">
+      <div v-if="transfer && transfer.phase !== 'pending'" class="home-transfer-card" :class="`is-${transfer.phase}`" :style="ghostStyle" aria-hidden="true">
+        <img v-if="transfer.selection.cover" :src="transfer.selection.cover" alt="" :draggable="false" />
+        <span v-else>{{ transfer.selection.title }}</span>
+      </div>
+    </Teleport>
   </div>
 </template>

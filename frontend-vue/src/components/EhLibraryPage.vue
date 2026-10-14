@@ -82,7 +82,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
         </div>
         <div v-else-if="!library.pagedGalleries.length" class="empty-state">
           <h2>暂无作品</h2>
-          <p>在设置中配置 Eh 库目录并扫描</p>
+          <p>在设置中配置 本子库目录并扫描</p>
         </div>
         <div
           v-for="gallery in library.pagedGalleries"

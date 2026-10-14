@@ -3,9 +3,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useEhReaderStore } from "../stores/ehReader";
 import { useNavigationStore } from "../stores/navigation";
 import { currentTauriWindow, type TauriWindowHandle } from "../api/tauri";
+import { useReaderPresentation } from "../features/reader/useReaderPresentation";
 
 const reader = useEhReaderStore();
 const navigation = useNavigationStore();
+const { shown, pending, bindImage } = useReaderPresentation();
 const maximized = ref(false);
 const fullscreen = ref(false);
 const fullscreenBusy = ref(false);
@@ -14,10 +16,16 @@ const readerElement = ref<HTMLElement | null>(null);
 const readerCanvas = ref<HTMLElement | null>(null);
 let stopResize: (() => void) | undefined;
 let restoreMaximizedAfterFullscreen = false;
-const visiblePages = computed(() => {
-  const pages = reader.currentSpread?.pages || [];
-  return reader.direction === "rtl" ? [...pages].reverse() : pages;
-});
+let wheelDelta = 0;
+let lastWheelAt = 0;
+let wheelLockedUntil = 0;
+const frames = computed(() => [shown.value, pending.value].filter(frame => !!frame));
+const displayedPageNumber = computed(() => shown.value
+  ? Math.min(...shown.value.pages.map(page => page.index)) + 1
+  : reader.currentPageNumber);
+const displayedSpreadIndex = computed(() => shown.value
+  ? Math.max(0, reader.spreads.findIndex(spread => spread.pages.some(page => page.index === displayedPageNumber.value - 1)))
+  : reader.spreadIndex);
 
 function handleKeydown(event: KeyboardEvent): void {
   if (navigation.activePage !== "page-eh-reader") return;
@@ -118,16 +126,28 @@ async function closeWindow(): Promise<void> {
 }
 
 function scrollZoomedPage(event: WheelEvent): void {
-  if (reader.zoom <= 100 || !readerCanvas.value) return;
   const target = event.target as HTMLElement;
   if (target.closest(".reader-tools, .reader-side-tools, .reader-settings")) return;
+
+  if (reader.zoom <= 100) {
+    if (!event.deltaY) return;
+    event.preventDefault();
+    const now = performance.now();
+    if (now < wheelLockedUntil) return;
+    if (now - lastWheelAt > 180) wheelDelta = 0;
+    lastWheelAt = now;
+    wheelDelta += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 240 : 1);
+    if (Math.abs(wheelDelta) < 45) return;
+    if (wheelDelta > 0) reader.next();
+    else reader.previous();
+    wheelDelta = 0;
+    wheelLockedUntil = now + 260;
+    return;
+  }
+
+  if (!readerCanvas.value) return;
   event.preventDefault();
   readerCanvas.value.scrollTop += event.deltaY;
-}
-
-function recordPageDimensions(pageIndex: number, event: Event): void {
-  const image = event.currentTarget as HTMLImageElement;
-  reader.recordPageDimensions(pageIndex, image.naturalWidth, image.naturalHeight);
 }
 
 watch(
@@ -140,7 +160,7 @@ watch(
 );
 
 watch(
-  () => reader.spreadIndex,
+  () => shown.value?.id,
   async () => {
     await nextTick();
     if (readerCanvas.value) readerCanvas.value.scrollTop = 0;
@@ -191,10 +211,10 @@ onBeforeUnmount(() => {
       <header class="reader-top" :class="{ visible: reader.toolsVisible }">
         <button class="reader-back" :aria-label="fullscreen ? '退出全屏' : '退出阅读'" @click.stop="returnFromReader">‹</button
         ><strong>{{ reader.gallery?.title }}</strong
-        ><span>{{ reader.currentPageNumber }} / {{ reader.pages.length }}</span>
+        ><span>{{ displayedPageNumber }} / {{ reader.pages.length }}</span>
       </header>
-      <div v-if="reader.loading" class="reader-state">正在准备页面...</div>
-      <div v-else-if="reader.error" class="reader-state">
+      <div v-if="reader.loading && !shown" class="reader-state">正在准备页面...</div>
+      <div v-else-if="reader.error && !shown" class="reader-state">
         {{ reader.error }}
       </div>
       <div
@@ -204,20 +224,10 @@ onBeforeUnmount(() => {
         :class="{ zoomed: reader.zoom > 100 }"
         :style="{ '--zoom': reader.zoom / 100 }"
       >
-        <div
-          class="reader-pages"
-          :class="{
-            single: visiblePages.length === 1,
-            merged: reader.currentPairMerged,
-          }"
-        >
-          <img
-            v-for="page in visiblePages"
-            :key="page.index"
-            :src="reader.imageUrl(page.path)"
-            :class="{ landscape: page.width > page.height }"
-            @load="recordPageDimensions(page.index, $event)"
-          />
+        <div v-for="frame in frames" :key="frame.id" class="reader-frame" :class="{ preparing: frame !== shown }" :aria-hidden="frame !== shown">
+          <div class="reader-pages" :class="{ single: frame.pages.length === 1, merged: frame.merged }">
+            <img v-for="page in frame.pages" :key="page.index" :ref="element => bindImage(frame, page.index, element)" :src="page.src" :width="page.width" :height="page.height" :class="{ landscape: page.width > page.height }" />
+          </div>
         </div>
       </div>
       <button
@@ -241,9 +251,9 @@ onBeforeUnmount(() => {
       ></div>
       <div class="reader-page-info" :class="{ visible: reader.toolsVisible }">
         <strong
-          >{{ reader.currentPageNumber
-          }}<template v-if="reader.currentSpread?.pages.length === 2"
-            >–{{ reader.currentPageNumber + 1 }}</template
+          >{{ displayedPageNumber
+          }}<template v-if="shown?.pages.length === 2"
+            >–{{ displayedPageNumber + 1 }}</template
           ></strong
         ><span>/ {{ reader.pages.length }} 页</span>
       </div>
@@ -263,9 +273,9 @@ onBeforeUnmount(() => {
         <div class="reader-progress">
           <button :aria-label="reader.direction === 'rtl' ? '下一页' : '上一页'" @click="reader.turnLeft">|‹</button
           ><span
-            >{{ reader.currentPageNumber }} / {{ reader.pages.length }}</span
+            >{{ displayedPageNumber }} / {{ reader.pages.length }}</span
           ><input
-            :value="reader.spreadIndex"
+            :value="displayedSpreadIndex"
             :dir="reader.direction"
             aria-label="阅读进度"
             type="range"

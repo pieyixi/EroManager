@@ -1,0 +1,140 @@
+/* 首页抽卡：同一套克制卡框、无文字背纹，独立牌堆与预览动效。 */
+#page-home .home-draw-layout {
+  --draw-height: clamp(240px, 42vh, 430px);
+  width: min(1320px, 100%); margin: auto; padding: 72px 52px 112px;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(96px, 10vw, 200px);
+}
+.home-draw-lane { min-width: 0; width: min(100%, calc(var(--draw-height) + 18px)); justify-self: center; }
+.home-draw-heading { margin: 0 0 22px; color: var(--text-strong); font-size: 17px; font-weight: 650; }
+.home-draw-stage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(70px, 26%); gap: 18px; height: var(--draw-height); }
+.home-draw-cover {
+  position: relative; z-index: 2; min-width: 0; min-height: 0; height: 100%; padding: 0; border: 0; border-radius: 13px;
+  background: transparent; isolation: isolate; cursor: pointer; touch-action: none;
+}
+.home-draw-cover:focus-visible { outline: 3px solid var(--primary); outline-offset: 7px; }
+.home-draw-cover:disabled { cursor: default; opacity: 1; }
+.home-draw-media { --tuck-direction: -1; }
+.home-draw-book { --tuck-direction: -1; }
+.home-draw-deck-bottom {
+  position: absolute; inset: 0;
+  border: 1px solid var(--line-strong); border-radius: 13px;
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--shell-shadow) 65%, transparent);
+  transition: transform .32s cubic-bezier(.2, .75, .2, 1);
+}
+.home-draw-deck-base { z-index: 0; transform: translate(-7px, 11px) rotate(-3deg); }
+.home-draw-deck-middle { z-index: 2; transform: translate(5px, 6px) rotate(2deg); }
+.home-draw-cover.phase-idle:not(:disabled):not(.is-transferring):hover .home-draw-deck-base { transform: translate(-12px, 12px) rotate(-6deg); }
+.home-draw-cover.phase-idle:not(:disabled):not(.is-transferring):hover .home-draw-deck-middle { transform: translate(11px, 6px) rotate(5deg); }
+.home-draw-incoming, .home-draw-retiring { position: absolute; inset: 0; perspective: 1400px; transform-style: flat; }
+.home-draw-incoming { z-index: 3; }
+.home-draw-flipper, .home-retiring-flipper { position: relative; display: block; width: 100%; height: 100%; transform-style: preserve-3d; }
+/* 提前保留顶牌合成层，避免最后连续翻转开始时才提升图层。 */
+.home-draw-flipper { transform: rotateY(720deg); will-change: transform; }
+.home-draw-face {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line-strong); border-radius: 13px; backface-visibility: hidden; overflow: hidden;
+  background: var(--surface); box-shadow: 0 10px 24px color-mix(in srgb, var(--shell-shadow) 70%, transparent);
+}
+.home-draw-front { padding: 5px; transform: translateZ(.5px); }
+.home-draw-front img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+.home-draw-front::after { content: ''; position: absolute; inset: 5px; border: 1px solid color-mix(in srgb, var(--surface) 24%, transparent); border-radius: 8px; pointer-events: none; }
+.home-draw-back { transform: rotateY(180deg) translateZ(.5px); }
+.home-card-back-design {
+  --card-back-paper: #fff;
+  position: absolute; inset: 0; display: grid; place-items: center; border-radius: 12px; overflow: hidden;
+  background: var(--card-back-paper);
+}
+.home-card-back-art { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; pointer-events: none; }
+.home-card-back-night { display: none; }
+:root[data-theme="dark"] .home-card-back-design { --card-back-paper: #292b2d; }
+:root[data-theme="dark"] .home-card-back-day { display: none; }
+:root[data-theme="dark"] .home-card-back-night { display: block; }
+
+/* 每张牌独立透视，整牌侧移出牌堆后才改层序；清晰滑回底部，不靠虚化或淡出。 */
+.phase-closing .home-draw-incoming, .phase-tucking .home-draw-incoming { transform: translate(5px, 4px) rotate(1deg); }
+.phase-closing .home-draw-flipper, .phase-tucking .home-draw-flipper, .phase-waiting .home-draw-flipper { transform: rotateY(180deg); }
+.home-draw-retiring { z-index: 1; transform: translate(-7px, 11px) rotate(-3deg); pointer-events: none; }
+.home-retiring-flipper { transform: rotateY(180deg); }
+.phase-closing .home-draw-retiring { z-index: 4; transform: translate(0, 0); }
+.phase-closing .home-retiring-flipper { animation: homeDeckTurn .38s cubic-bezier(.4, 0, .2, 1) both; will-change: transform; }
+.phase-tucking .home-draw-retiring { animation: homeDeckTuck .94s both; will-change: transform; }
+.phase-tucking .home-draw-incoming { animation: homeDeckLift .94s cubic-bezier(.22, 1, .36, 1) both; will-change: transform; }
+/* 均衡加速/减速，降低中段角速度峰值；不改变前面的翻背、塞底与后面的落定。 */
+.phase-opening .home-draw-flipper { animation: homeDeckReveal 1.1s cubic-bezier(.35, 0, .65, 1) both; }
+.phase-settling .home-draw-incoming { animation: homeDeckLand .26s linear both; will-change: transform; }
+/* 只在落定扫一次窄幅镭射亮面，不做全卡闪白，也不改变牌堆层序。 */
+.home-draw-front::before, .home-draw-preview-image::after {
+  content: ''; position: absolute; z-index: 1; top: -25%; left: -10%; width: 55%; height: 150%;
+  background: linear-gradient(112deg, transparent 14%, rgba(114,211,255,.09) 33%, rgba(255,255,255,.3) 49%, rgba(198,159,255,.12) 66%, transparent 82%);
+  opacity: 0; transform: translateX(-140%); pointer-events: none;
+}
+.phase-settling .home-draw-incoming .home-draw-front::before,
+.home-draw-previews.is-refreshing .home-draw-preview-image::after { animation: homeCardFoil .26s ease-out both; }
+@keyframes homeCardFoil {
+  0% { transform: translateX(-140%); opacity: 0; }
+  18% { opacity: .65; }
+  78% { opacity: .65; }
+  100% { transform: translateX(300%); opacity: 0; }
+}
+@keyframes homeDeckTurn { from { transform: rotateY(0); } to { transform: rotateY(180deg); } }
+@keyframes homeDeckTuck {
+  0% { z-index: 4; transform: translate(0, 0); animation-timing-function: cubic-bezier(.4, 0, .3, 1); }
+  48% { z-index: 4; transform: translate(calc(var(--tuck-direction) * 108%), 10px); }
+  49% { z-index: 1; transform: translate(calc(var(--tuck-direction) * 108%), 10px); animation-timing-function: cubic-bezier(.45, 0, .22, 1); }
+  100% { z-index: 1; transform: translate(-7px, 11px) rotate(-3deg); }
+}
+@keyframes homeDeckLift { from { transform: translate(5px, 4px) rotate(1deg); } to { transform: translate(0, 0); } }
+@keyframes homeDeckReveal { from { transform: rotateY(180deg); } to { transform: rotateY(720deg); } }
+@keyframes homeDeckLand {
+  0% { transform: translate(0, 0) rotate(0); }
+  20% { transform: translate(1.5px, 1px) rotate(.45deg); }
+  45% { transform: translate(-1px, -.5px) rotate(-.3deg); }
+  70% { transform: translate(.5px, .25px) rotate(.12deg); }
+  100% { transform: translate(0, 0) rotate(0); }
+}
+.home-draw-placeholder { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--soft); font-size: 13px; }
+.home-draw-placeholder .fluent-icon { font-size: 32px; }
+
+/* 上中下分布；大幅放大仍保留真实比例，通过缩小相邻预览让位。 */
+.home-draw-previews {
+  --preview-max-width: 260px;
+  --preview-gap: 12px;
+  --preview-image-space: calc(var(--draw-height) - (var(--preview-count) - 1) * var(--preview-gap));
+  --preview-slot-height: calc(var(--preview-image-space) / var(--preview-count));
+  --expanded-frame-height: min(calc(var(--preview-max-width) / var(--active-preview-ratio)), calc(var(--preview-image-space) * .64));
+  --neighbor-frame-height: calc((var(--preview-image-space) - var(--expanded-frame-height)) / max(1, calc(var(--preview-count) - 1)));
+  position: relative; z-index: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: space-between; gap: var(--preview-gap);
+}
+.home-draw-previews.is-short { --preview-gap: 18px; justify-content: center; }
+/* 两张围绕卡牌水平中线对称分布，剩余空间均分；悬停放大时仍能给邻图让位。 */
+.home-draw-previews.is-pair { justify-content: space-evenly; }
+.home-draw-book .home-draw-previews { --preview-max-width: clamp(160px, 14vw, 260px); }
+.home-draw-previews.is-changing { pointer-events: none; }
+.home-draw-preview {
+  flex: 0 0 auto; min-width: 0; width: min(100%, calc(var(--preview-slot-height) * var(--preview-ratio))); display: flex; flex-direction: column;
+  transition: width .46s cubic-bezier(.2, .75, .2, 1);
+}
+.home-draw-previews.has-hover .home-draw-preview { width: min(100%, calc(var(--neighbor-frame-height) * var(--preview-ratio))); }
+.home-draw-previews.has-hover .home-draw-preview.is-expanded { width: calc(var(--expanded-frame-height) * var(--active-preview-ratio)); }
+.home-draw-preview-image {
+  position: relative; flex: 0 0 auto; width: 100%; aspect-ratio: var(--preview-ratio); overflow: hidden; display: grid; place-items: center;
+  background: var(--media-bg); border: 1px solid var(--line); border-radius: 7px;
+  transition: border-color .3s ease, box-shadow .3s ease;
+}
+.home-draw-preview.is-expanded .home-draw-preview-image { border-color: var(--line-strong); box-shadow: 0 10px 24px var(--shell-shadow); }
+.home-draw-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.home-preview-empty { font-size: 11px; color: var(--soft); }
+.home-draw-copy { width: calc(74% - 18px); min-width: 0; text-align: center; padding-top: 22px; }
+.home-draw-title { height: 40px; margin-bottom: 16px; font-size: 13px; color: var(--text-secondary); line-height: 20px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.home-draw-detail { height: 36px; min-width: 116px; border-radius: 8px; padding: 0 18px; font-size: 13px; }
+.home-draw-detail:disabled { opacity: .45; cursor: default; }
+.home-draw-error { margin-top: 12px; color: var(--danger); font-size: 12px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 900px) {
+  #page-home .home-draw-layout { padding: 32px 28px; gap: 60px; --draw-height: clamp(240px, 42vh, 380px); }
+  .home-draw-stage { gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(58px, 26%); }
+  .home-draw-copy { width: calc(74% - 12px); }
+  .home-draw-previews { --preview-max-width: 180px; }
+}
+@media (max-width: 650px) {
+  #page-home .home-draw-layout { max-width: 420px; grid-template-columns: minmax(0, 1fr); gap: 36px; }
+}

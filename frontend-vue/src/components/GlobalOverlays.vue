@@ -96,7 +96,7 @@ onBeforeUnmount(() => {
   </div>
   <div ref="menuElement" class="context-menu" :class="{ active: navigation.contextMenu.visible }" id="workContextMenu" :style="{ left: `${navigation.contextMenu.x}px`, top: `${navigation.contextMenu.y}px` }">
     <button v-if="navigation.contextMenu.mode === 'home'" class="context-item" id="ctxRefreshHome" @click="refreshLibrary">刷新主库</button>
-    <button v-if="navigation.contextMenu.mode === 'eh-home'" class="context-item" id="ctxRefreshEh" @click="refreshEhLibrary">刷新 Eh 库</button>
+    <button v-if="navigation.contextMenu.mode === 'eh-home'" class="context-item" id="ctxRefreshEh" @click="refreshEhLibrary">刷新 本子库</button>
     <button v-if="navigation.contextMenu.mode === 'work'" class="context-item danger" id="ctxDeleteWork" @click="deleteWork">删除作品</button>
     <button v-if="navigation.contextMenu.mode === 'eh-work'" class="context-item" @click="deleteEhGallery(false)">仅删除数据库</button>
     <button v-if="navigation.contextMenu.mode === 'eh-work'" class="context-item danger" @click="deleteEhGallery(true)">删除本地文件</button>

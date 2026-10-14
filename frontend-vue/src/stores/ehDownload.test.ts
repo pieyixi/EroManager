@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EhDownloadResult } from '../api/contracts/eh';
+import type { EhDownloadResult, EhGallerySummary } from '../api/contracts/eh';
 import type { EhDownloadHistory } from './ehDownload';
 
 const mocks = vi.hoisted(() => ({
@@ -13,15 +13,19 @@ const mocks = vi.hoisted(() => ({
   deleteHitomiFolder: vi.fn().mockResolvedValue(undefined),
   getEhDashboard: vi.fn().mockResolvedValue({ total_count: 0, total_pages: 0, total_bytes: 0, categories: [] }),
   askConfirm: vi.fn().mockResolvedValue(true),
+  libraryLoad: vi.fn().mockResolvedValue(undefined),
+  showDetail: vi.fn(),
 }));
+const library = { galleries: [] as EhGallerySummary[], load: mocks.libraryLoad, showDetail: mocks.showDetail,
+  error: '', currentSort: '', currentPage: 1 };
 vi.mock('../api/commands/eh', () => ({ ehApi: mocks }));
 vi.mock('../api/commands/settings', () => ({ settingsApi: mocks }));
 vi.mock('../api/commands/system', () => ({ systemApi: { openFolder: vi.fn() } }));
 vi.mock('../api/tauri', () => ({ pickDirectory: vi.fn() }));
-vi.mock('./ehLibrary', () => ({ useEhLibraryStore: () => ({ load: vi.fn().mockResolvedValue(undefined), currentSort: '', currentPage: 1 }) }));
+vi.mock('./ehLibrary', () => ({ useEhLibraryStore: () => library }));
 vi.mock('./navigation', () => ({ useNavigationStore: () => ({ askConfirm: mocks.askConfirm }) }));
 
-import { useEhDownloadStore } from './ehDownload';
+import { isDownloadComplete, useEhDownloadStore } from './ehDownload';
 
 const ehResult = (id: number, downloaded = 3, failures: EhDownloadResult['failures'] = []): EhDownloadResult => ({
   gid: id, title: `Eh ${id}`, folder_path: `D:\\Eh\\${id}`, total_pages: 3,
@@ -37,14 +41,14 @@ const historyItem = (gid: number, failures: EhDownloadHistory['failures'] = []):
   gid, source: gid < 0 ? 'hitomi' : 'eh', title: `Work ${Math.abs(gid)}`,
   folderPath: `D:\\Eh\\${Math.abs(gid)}`, coverPath: '', totalPages: 3,
   downloadedPages: 3 - failures.length, failedPages: failures.map((failure) => failure.page),
-  failures, completedAt: '2026-10-11T00:00:00.000Z',
+  failures, queuedAt: '2026-10-11T00:00:00.000Z', completedAt: '2026-10-11T00:00:00.000Z',
 });
 async function idle(store: ReturnType<typeof useEhDownloadStore>): Promise<void> {
   await vi.waitFor(() => { expect(store.workerRunning).toBe(false); expect(store.queue).toHaveLength(0); });
 }
 
 describe('Eh and Hitomi download queue', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
   beforeEach(() => {
     setActivePinia(createPinia());
     for (const mock of Object.values(mocks)) mock.mockReset();
@@ -55,6 +59,9 @@ describe('Eh and Hitomi download queue', () => {
     mocks.deleteHitomiFolder.mockResolvedValue(undefined);
     mocks.getEhDashboard.mockResolvedValue({ total_count: 0, total_pages: 0, total_bytes: 0, categories: [] });
     mocks.askConfirm.mockResolvedValue(true);
+    mocks.libraryLoad.mockResolvedValue(undefined);
+    library.galleries = [];
+    library.error = '';
   });
 
   it('validates each lane independently and clears only that lane input', () => {
@@ -69,6 +76,57 @@ describe('Eh and Hitomi download queue', () => {
     expect([store.ehGidInput, store.ehTokenInput, store.hitomiIdInput]).toEqual(['', '', '456']);
     expect(store.messages.eh).toBeNull();
     expect(mocks.downloadGallery).not.toHaveBeenCalled();
+  });
+
+  it('opens the matching completed work without mixing same-number Eh and Hitomi IDs', async () => {
+    const store = useEhDownloadStore();
+    store.history = [historyItem(123), historyItem(-123)];
+    // Only identity is consumed by this action; the detail receives the original library object.
+    const eh = { gid: 123, title: 'Eh' } as EhGallerySummary;
+    const hitomi = { gid: -123, title: 'Hitomi' } as EhGallerySummary;
+    library.galleries = [eh, hitomi];
+    await store.openCompletedGallery(123);
+    expect(mocks.showDetail).toHaveBeenLastCalledWith(eh);
+    await store.openCompletedGallery(-123);
+    expect(mocks.showDetail).toHaveBeenLastCalledWith(hitomi);
+    expect(mocks.libraryLoad).not.toHaveBeenCalled();
+    expect(mocks.downloadGallery).not.toHaveBeenCalled();
+    expect(mocks.downloadHitomi).not.toHaveBeenCalled();
+  });
+
+  it('refreshes a missing library entry before opening and reports deleted entries without navigating', async () => {
+    const store = useEhDownloadStore();
+    store.history = [historyItem(-124), historyItem(125)];
+    const gallery = { gid: -124, title: 'Hitomi' } as EhGallerySummary;
+    mocks.libraryLoad.mockImplementationOnce(async () => { library.galleries = [gallery]; });
+    await store.openCompletedGallery(-124);
+    expect(mocks.libraryLoad).toHaveBeenCalledTimes(1);
+    expect(mocks.showDetail).toHaveBeenCalledWith(gallery);
+    await store.openCompletedGallery(125);
+    expect(mocks.showDetail).toHaveBeenCalledTimes(1);
+    expect(store.messages.eh?.text).toContain('找不到');
+    library.error = '读取作品库失败';
+    await store.openCompletedGallery(125);
+    expect(store.messages.eh?.text).toBe('读取作品库失败');
+  });
+
+  it('never opens failed, incomplete, unknown, queued or downloading works', async () => {
+    const store = useEhDownloadStore();
+    const failed = historyItem(126, [{ page: 3, reason: '超时' }]);
+    const incomplete = { ...historyItem(127), downloadedPages: 2 };
+    const zeroPages = { ...historyItem(128), totalPages: 0, downloadedPages: 0 };
+    const error = { ...historyItem(129), error: '入库失败' };
+    store.history = [failed, incomplete, zeroPages, error, historyItem(130), historyItem(-131)];
+    store.queue = [
+      { key: 'eh:130', source: 'eh', id: 130, title: '等待', status: 'queued', progressPercent: 0,
+        progressText: '', totalPages: 3, downloadedPages: 0, coverPath: '', queuedAt: '2026-10-11T01:00:00.000Z' },
+      { key: 'hitomi:131', source: 'hitomi', id: 131, title: '下载中', status: 'downloading', progressPercent: 33,
+        progressText: '', totalPages: 3, downloadedPages: 1, coverPath: '', queuedAt: '2026-10-11T02:00:00.000Z' },
+    ];
+    for (const item of [failed, incomplete, zeroPages, error]) expect(isDownloadComplete(item)).toBe(false);
+    for (const gid of [126, 127, 128, 129, 130, -131, 999]) await store.openCompletedGallery(gid);
+    expect(mocks.showDetail).not.toHaveBeenCalled();
+    expect(mocks.libraryLoad).not.toHaveBeenCalled();
   });
 
   it('accepts another work while one runs, then processes both sources in FIFO order', async () => {
@@ -91,6 +149,86 @@ describe('Eh and Hitomi download queue', () => {
     expect(mocks.downloadHitomi).toHaveBeenCalledWith({ id: 202, pageIndices: undefined });
     expect(store.ehHistory[0]).toMatchObject({ gid: 101, coverPath: 'D:\\Eh\\101\\data\\cover.jpg' });
     expect(store.hitomiHistory[0]).toMatchObject({ gid: -202, downloadedPages: 3 });
+  });
+
+  it('stacks newest work before all cards and keeps its slot through completion and clock rollback', () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-12T00:00:00.000Z'));
+    const store = useEhDownloadStore();
+    store.workerRunning = true;
+    store.history = [historyItem(-900)];
+    for (const id of [101, 102, 103]) store.enqueue('hitomi', id);
+    const order = [-103, -102, -101, -900];
+    expect(store.cards.map((card) => card.gid)).toEqual(order);
+    expect(new Set(store.queue.map((job) => job.queuedAt)).size).toBe(3);
+    const first = store.queue[0];
+    first.status = 'downloading'; first.progressPercent = 90;
+    expect(store.cards.map((card) => card.gid)).toEqual(order);
+    store.rememberResult(hitomiResult(101), first);
+    store.queue = store.queue.filter((job) => job.key !== first.key);
+    expect(store.cards.map((card) => card.gid)).toEqual(order);
+    expect(store.cards[2]).toMatchObject({ key: first.key, kind: 'history', queuedAt: first.queuedAt });
+    store.removeQueued('hitomi:102');
+    clock.mockReturnValue(Date.parse('2020-01-01T00:00:00.000Z'));
+    store.enqueue('hitomi', 104);
+    expect(store.cards.map((card) => card.gid)).toEqual([-104, -103, -101, -900]);
+    expect(mocks.downloadHitomi).not.toHaveBeenCalled();
+  });
+
+  it('keeps one card and its original slot through failure, retry and successful completion', () => {
+    const store = useEhDownloadStore();
+    store.workerRunning = true;
+    store.history = [historyItem(-300), historyItem(-200, [{ page: 3, reason: '超时' }]), historyItem(-100)]
+      .map((item) => ({ ...item, queuedAt: `2026-10-11T0${Math.abs(item.gid) / 100}:00:00.000Z` }));
+    const order = [-300, -200, -100];
+    const originalTime = store.history.find((item) => item.gid === -200)!.queuedAt;
+    store.retryHistoryPages(store.history.find((item) => item.gid === -200)!);
+    expect(store.cards.map((card) => card.gid)).toEqual(order);
+    expect(store.cards[1]).toMatchObject({ key: 'hitomi:200', kind: 'queue', queuedAt: originalTime });
+    store.rememberError(store.queue[0], new Error('再次超时'));
+    store.queue = [];
+    expect(store.cards.map((card) => card.gid)).toEqual(order);
+    store.retryHistoryPages(store.history.find((item) => item.gid === -200)!);
+    store.rememberResult(hitomiResult(200), store.queue[0]);
+    store.queue = [];
+    expect(store.cards.map((card) => card.gid)).toEqual(order);
+    expect(store.cards[1]).toMatchObject({ key: 'hitomi:200', kind: 'history', queuedAt: originalTime });
+    expect(store.history.find((item) => item.gid === -200)?.failedPages).toEqual([]);
+  });
+
+  it('recovers admission times from legacy history and persists stable order without credentials', () => {
+    const old = historyItem(801); const newer = historyItem(-802);
+    let encoded = JSON.stringify([
+      { ...newer, queuedAt: 'invalid-time', completedAt: '2026-10-11T02:00:00.000Z' },
+      { ...old, queuedAt: undefined, completedAt: '2026-10-11T01:00:00.000Z' },
+    ]);
+    vi.stubGlobal('window', { localStorage: {
+      getItem: () => encoded, setItem: (_key: string, value: string) => { encoded = value; },
+    } });
+    const store = useEhDownloadStore();
+    expect(store.cards.map((card) => card.gid)).toEqual([-802, 801]);
+    expect(store.history.find((item) => item.gid === 801)?.queuedAt).toBe('2026-10-11T01:00:00.000Z');
+    store.workerRunning = true;
+    store.enqueue('eh', 803, 'never-persist-this-token');
+    const admitted = store.queue[0].queuedAt;
+    store.rememberResult(ehResult(803), store.queue[0]);
+    store.queue = [];
+    expect(encoded).not.toContain('never-persist-this-token');
+    setActivePinia(createPinia());
+    const restored = useEhDownloadStore();
+    expect(restored.cards.map((card) => card.gid)).toEqual([803, -802, 801]);
+    expect(restored.history.find((item) => item.gid === 803)?.queuedAt).toBe(admitted);
+    expect(restored.queue).toEqual([]);
+  });
+
+  it('replaces only the matching source card when retrying same-number Eh and Hitomi works', () => {
+    const store = useEhDownloadStore();
+    store.workerRunning = true;
+    store.history = [historyItem(50), historyItem(-50, [{ page: 3, reason: '超时' }])];
+    const keys = store.cards.map((card) => card.key);
+    store.retryHistoryPages(store.hitomiHistory[0]);
+    expect(store.cards.map((card) => card.key)).toEqual(keys);
+    expect(store.cards.map((card) => [card.source, card.kind])).toEqual([['eh', 'history'], ['hitomi', 'queue']]);
+    expect(store.cards).toHaveLength(2);
   });
 
   it('reports progress on the active card while the waiting card remains at zero', async () => {

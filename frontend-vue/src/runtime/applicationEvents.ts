@@ -93,12 +93,12 @@ export function installApplicationEvents(library: LibraryStore): () => void {
   listenDocument("keyup", handlePlayerKeyup);
   listenDocument("contextmenu", (event) => {
     event.preventDefault();
-    const insideHomeGrid =
-      navigation.activePage === "page-home" &&
+    const insideMediaGrid =
+      navigation.activePage === "page-media-library" &&
       event
         .composedPath()
         .some((node) => node instanceof HTMLElement && node.id === "coverGrid");
-    if (insideHomeGrid) return;
+    if (insideMediaGrid) return;
     library.closeDropdown();
     navigation.closeContextMenu();
   });

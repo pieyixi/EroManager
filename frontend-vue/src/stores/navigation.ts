@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
 
-export type PageId = 'page-home' | 'page-eh-library' | 'page-eh-reader' | 'page-detail' | 'page-player' | 'page-settings' | 'page-eh-download' | 'page-unarchived' | 'page-archive';
+export type PageId = 'page-home' | 'page-media-library' | 'page-eh-library' | 'page-eh-reader' | 'page-detail' | 'page-player' | 'page-settings' | 'page-eh-download' | 'page-unarchived' | 'page-archive';
 export type ContextMenuMode = 'home' | 'work' | 'eh-home' | 'eh-work' | 'eh-history';
+export type DetailReturnPage = 'page-home' | 'page-media-library' | 'page-eh-library';
 
 interface ConfirmationState {
   visible: boolean;
@@ -22,7 +23,10 @@ interface ContextMenuState {
 export const useNavigationStore = defineStore('navigation', {
   state: () => ({
     activePage: 'page-home' as PageId,
+    pageRevision: 0,
     detailSource: 'media' as 'media' | 'eh',
+    detailReturnPage: null as DetailReturnPage | null,
+    downloadReturnPage: 'page-home' as PageId,
     confirmation: {
       visible: false,
       title: '',
@@ -39,9 +43,32 @@ export const useNavigationStore = defineStore('navigation', {
     } as ContextMenuState,
     confirmationResolver: null as ((confirmed: boolean) => void) | null,
   }),
+  getters: {
+    // 默认返回所属作品库；首页抽卡可显式指定首页，并贯穿播放/阅读往返。
+    backPage(state): PageId {
+      if (state.activePage === 'page-detail') return state.detailReturnPage || (state.detailSource === 'eh' ? 'page-eh-library' : 'page-media-library');
+      if (state.activePage === 'page-eh-download') return state.downloadReturnPage;
+      if (state.activePage === 'page-archive') return 'page-unarchived';
+      return 'page-home';
+    },
+  },
   actions: {
-    showPage(page: PageId): void {
+    showPage(page: PageId, detailReturnPage?: DetailReturnPage): void {
+      // 下载既可从设置进入，也可从侧栏进入；重复点击不能把返回地址记成下载页自身。
+      if (page === 'page-eh-download' && this.activePage !== page) this.downloadReturnPage = this.activePage;
+      if (page !== this.activePage) this.pageRevision += 1;
+      if (page === 'page-detail') {
+        // 播放/阅读回到详情时保留原入口；新的详情入口必须清除上一条返回链。
+        if (detailReturnPage) this.detailReturnPage = detailReturnPage;
+        else if (this.activePage !== 'page-player' && this.activePage !== 'page-eh-reader') this.detailReturnPage = null;
+      }
       this.activePage = page;
+    },
+    goBack(): void {
+      // 返回原详情时保留它的首页/库入口；点击下载封面打开新详情仍走原来的清理规则。
+      const detailReturnPage = this.activePage === 'page-eh-download' && this.backPage === 'page-detail'
+        ? this.detailReturnPage || undefined : undefined;
+      this.showPage(this.backPage, detailReturnPage);
     },
     askConfirm(title: string, body: string, actionText = '确认', destructive = false): Promise<boolean> {
       this.resolveConfirm(false);

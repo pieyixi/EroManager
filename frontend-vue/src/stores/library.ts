@@ -3,7 +3,7 @@ import { libraryApi } from '../api/commands/library';
 import { mediaApi } from '../api/commands/media';
 import { systemApi } from '../api/commands/system';
 import type { TagSummary, WorkDetail, WorkSummary } from '../api/contracts/library';
-import { useNavigationStore } from './navigation';
+import { type DetailReturnPage, useNavigationStore } from './navigation';
 
 export type FilterKey = 'year' | 'studio' | 'story' | 'attr' | 'scene';
 export type SortKey = 'time-desc' | 'time-asc' | 'name-asc' | 'name-desc';
@@ -413,7 +413,7 @@ export const useLibraryStore = defineStore('library', {
     },
     async refreshHome(options: ReloadOptions = {}): Promise<void> {
       useNavigationStore().closeContextMenu();
-      useNavigationStore().showPage('page-home');
+      useNavigationStore().showPage('page-media-library');
       await this.reload(options);
     },
     showDisconnected(): void {
@@ -421,16 +421,19 @@ export const useLibraryStore = defineStore('library', {
       this.disconnected = true;
       this.error = '';
     },
-    async showDetail(workId: number): Promise<void> {
+    async showDetail(workId: number, returnPage?: DetailReturnPage): Promise<void> {
+      const navigation = useNavigationStore();
+      const revision = navigation.pageRevision;
       try {
         const detail = await libraryApi.getWorkDetail(workId);
         if (!detail?.work) return;
+        if (returnPage && navigation.pageRevision !== revision) return;
+        await this.loadCovers([detail.work.cover_path, ...detail.episodes.map((episode) => episode.cover_path)].filter((path): path is string => Boolean(path)));
+        if (returnPage && navigation.pageRevision !== revision) return;
         this.currentDetailWorkId = workId;
         this.currentDetail = detail;
-        await this.loadCovers([detail.work.cover_path, ...detail.episodes.map((episode) => episode.cover_path)].filter((path): path is string => Boolean(path)));
-        const navigation = useNavigationStore();
         navigation.detailSource = 'media';
-        navigation.showPage('page-detail');
+        navigation.showPage('page-detail', returnPage);
       } catch (error) {
         console.error('show detail failed:', error);
       }
@@ -438,7 +441,7 @@ export const useLibraryStore = defineStore('library', {
     jumpToSingleFilter(key: FilterKey, value: string): void {
       this.resetHomeFilters();
       this.activeFilters[key] = { [value]: true };
-      useNavigationStore().showPage('page-home');
+      useNavigationStore().showPage('page-media-library');
     },
     async openWorkFolder(path?: string): Promise<void> {
       if (!path) return;
@@ -455,7 +458,7 @@ export const useLibraryStore = defineStore('library', {
         if (this.currentDetailWorkId === workId) {
           this.currentDetailWorkId = null;
           this.currentDetail = null;
-          navigation.showPage('page-home');
+          navigation.showPage('page-media-library');
         }
         await this.initialize();
       } catch (error) {

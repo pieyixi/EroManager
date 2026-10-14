@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { ehApi } from "../api/commands/eh";
 import { createPinia, setActivePinia } from "pinia";
 import {
   buildEhSpreads,
@@ -46,6 +47,26 @@ describe("Eh reader spread matching", () => {
 });
 
 describe("Eh reader page-turn direction", () => {
+  it("ignores a late page list from a previously opened work", async () => {
+    setActivePinia(createPinia());
+    const reader = useEhReaderStore();
+    let finishOld!: (pages: EhReaderPage[]) => void;
+    const getPages = vi.spyOn(ehApi, 'getPages')
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }))
+      .mockResolvedValueOnce([portrait(5)]);
+    vi.spyOn(reader, 'loadSpreadImages').mockResolvedValue();
+    vi.spyOn(reader, 'prefetchNearby').mockResolvedValue();
+    try {
+      const old = reader.open({ gid: 1 } as Parameters<typeof reader.open>[0]);
+      await reader.open({ gid: 2 } as Parameters<typeof reader.open>[0]);
+      finishOld([landscape(0)]);
+      await old;
+      expect(reader.gallery?.gid).toBe(2);
+      expect(reader.pages.map(page => page.index)).toEqual([5]);
+      expect(reader.loading).toBe(false);
+    } finally { getPages.mockRestore(); }
+  });
+
   it("starts from path-only page metadata and records dimensions lazily", () => {
     setActivePinia(createPinia());
     const reader = useEhReaderStore();

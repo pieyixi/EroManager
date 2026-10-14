@@ -40,8 +40,9 @@ const ehFilterLabels: Record<EhFilterKey, string> = {
 };
 
 const isHome = computed(() => navigation.activePage === "page-home");
+const isMediaLibrary = computed(() => navigation.activePage === "page-media-library");
 const isEh = computed(() => navigation.activePage === "page-eh-library");
-const isBrowsePage = computed(() => isHome.value || isEh.value);
+const isBrowsePage = computed(() => isMediaLibrary.value || isEh.value);
 const isPlayer = computed(() => navigation.activePage === "page-player");
 const isReader = computed(() => navigation.activePage === "page-eh-reader");
 const isImmersive = computed(() => isPlayer.value || isReader.value);
@@ -54,7 +55,8 @@ const pageTitle = computed(
         "page-eh-download": "作品下载",
         "page-unarchived": "未建档",
         "page-archive": "建档助手",
-        "page-eh-library": "本地书库",
+        "page-media-library": "里番库",
+        "page-eh-library": "本子库",
       }) as Record<string, string>
     )[navigation.activePage] || "首页",
 );
@@ -126,20 +128,18 @@ function collapseSearch(): void {
 
 function goHome(): void {
   library.closeDropdown();
+  ehLibrary.closeDropdown();
   navigation.showPage("page-home");
 }
 
+function openMediaLibrary(): void {
+  navigation.showPage("page-media-library");
+}
+
 function goBack(): void {
-  if (navigation.activePage === "page-eh-download")
-    navigation.showPage("page-settings");
-  else if (navigation.activePage === "page-archive")
+  if (navigation.activePage === "page-archive")
     void archive.openUnarchivedPage();
-  else if (
-    navigation.activePage === "page-detail" &&
-    navigation.detailSource === "eh"
-  )
-    navigation.showPage("page-eh-library");
-  else goHome();
+  else navigation.goBack();
 }
 
 function toggleTheme(event: MouseEvent): void {
@@ -179,8 +179,11 @@ function handleDocumentPointerDown(event: PointerEvent): void {
 
 watch(
   () => navigation.activePage,
-  (page) => {
-    if (page !== "page-home") collapseSearch();
+  () => {
+    collapseSearch();
+    library.closeDropdown();
+    ehLibrary.closeDropdown();
+    navigation.closeContextMenu();
   },
 );
 
@@ -220,12 +223,21 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="sidebar-item"
+        :class="{ active: isMediaLibrary }"
+        aria-label="里番"
+        @click="openMediaLibrary"
+      >
+        <svg class="sidebar-icon" width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 3 4 3 4-3"/><rect x="3" y="7" width="18" height="13" rx="3"/><path d="M8 20v1m8-1v1"/></svg>
+        <span class="sidebar-label">里番</span>
+      </button>
+      <button
+        class="sidebar-item"
         :class="{ active: navigation.activePage === 'page-eh-library' }"
-        aria-label="本地书库"
+        aria-label="本子"
         @click="ehLibrary.openPage"
       >
         <span class="fluent-icon sidebar-icon">&#xE82D;</span
-        ><span class="sidebar-label">Eh</span>
+        ><span class="sidebar-label">本子</span>
       </button>
     </div>
     <div class="sidebar-secondary">
@@ -259,7 +271,24 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="sidebar-item"
-        :class="{ active: navigation.activePage === 'page-settings' || navigation.activePage === 'page-eh-download' }"
+        :class="{ active: navigation.activePage === 'page-eh-download' }"
+        aria-label="下载"
+        @click="navigation.showPage('page-eh-download')"
+      >
+        <svg
+          class="sidebar-icon"
+          width="24" height="24" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+        >
+          <path d="M10.5 3.25h3a.75.75 0 0 1 .75.75v5.25H17a.65.65 0 0 1 .47 1.1l-4.65 4.82a1.15 1.15 0 0 1-1.64 0L6.53 10.35A.65.65 0 0 1 7 9.25h2.75V4a.75.75 0 0 1 .75-.75Z" />
+          <path d="M3.5 15.75v2.5a2.5 2.5 0 0 0 2.5 2.5h12a2.5 2.5 0 0 0 2.5-2.5v-2.5" />
+        </svg>
+        <span class="sidebar-label">下载</span>
+      </button>
+      <button
+        class="sidebar-item"
+        :class="{ active: navigation.activePage === 'page-settings' }"
         aria-label="设置"
         @click="settings.openSettingsPage"
       >
@@ -281,7 +310,7 @@ onBeforeUnmount(() => {
       @dblclick="toggleMaximize"
     ></div>
     <div class="titlebar-navigation" id="filterRow">
-      <template v-if="isHome">
+      <template v-if="isMediaLibrary">
         <button
           class="top-filter-tab"
           :class="{ active: library.isFilterActive('year') }"
@@ -352,11 +381,12 @@ onBeforeUnmount(() => {
         </button>
         <button
           class="top-sort-btn"
-          :class="{ active: ehLibrary.currentSort.startsWith('time') }"
-          @click="ehLibrary.toggleTimeSort"
+          :class="{ active: ehLibrary.currentSort.startsWith('added') }"
+          title="切换入库顺序"
+          @click="ehLibrary.toggleAddedSort"
         >
-          时间<span class="fluent-icon">{{
-            ehLibrary.currentSort === "time-desc" ? "\uE74A" : "\uE74B"
+          入库<span class="fluent-icon">{{
+            ehLibrary.currentSort === "added-desc" ? "\uE74A" : "\uE74B"
           }}</span>
         </button>
         <button
@@ -370,12 +400,11 @@ onBeforeUnmount(() => {
         </button>
         <button
           class="top-sort-btn"
-          :class="{ active: ehLibrary.currentSort.startsWith('added') }"
-          title="切换入库顺序"
-          @click="ehLibrary.toggleAddedSort"
+          :class="{ active: ehLibrary.currentSort.startsWith('time') }"
+          @click="ehLibrary.toggleTimeSort"
         >
-          入库<span class="fluent-icon">{{
-            ehLibrary.currentSort === "added-desc" ? "\uE74A" : "\uE74B"
+          时间<span class="fluent-icon">{{
+            ehLibrary.currentSort === "time-desc" ? "\uE74A" : "\uE74B"
           }}</span>
         </button>
       </template>
@@ -428,7 +457,7 @@ onBeforeUnmount(() => {
         清除
       </button>
       <button
-        v-if="isHome"
+        v-if="isMediaLibrary"
         class="titlebar-favorite fluent-icon"
         :class="{ active: library.favoriteCharacterMode }"
         :disabled="!library.favoriteCharacters.length"

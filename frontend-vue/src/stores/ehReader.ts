@@ -87,15 +87,17 @@ export const useEhReaderStore = defineStore("ehReader", {
       const generation = ++this.loadGeneration;
       useNavigationStore().showPage("page-eh-reader");
       try {
-        this.pages = await ehApi.getPages(gallery.gid);
+        const pages = await ehApi.getPages(gallery.gid);
         if (generation !== this.loadGeneration) return;
+        this.pages = pages;
         this.imageCache = {};
         await this.loadSpreadImages(this.spreadIndex, generation);
         void this.prefetchNearby(this.spreadIndex, generation);
       } catch (error) {
-        this.error = error instanceof Error ? error.message : String(error);
+        if (generation === this.loadGeneration)
+          this.error = error instanceof Error ? error.message : String(error);
       } finally {
-        this.loading = false;
+        if (generation === this.loadGeneration) this.loading = false;
       }
     },
     close(): void {
@@ -209,11 +211,14 @@ export const useEhReaderStore = defineStore("ehReader", {
     },
     async showCurrentSpread(): Promise<void> {
       const generation = this.loadGeneration;
+      const targetPath = this.currentSpread?.pages[0]?.path;
       try {
         await this.loadSpreadImages(this.spreadIndex, generation);
+        if (generation !== this.loadGeneration || targetPath !== this.currentSpread?.pages[0]?.path) return;
+        this.error = "";
         void this.prefetchNearby(this.spreadIndex, generation);
       } catch (error) {
-        if (generation === this.loadGeneration) {
+        if (generation === this.loadGeneration && targetPath === this.currentSpread?.pages[0]?.path) {
           this.error = error instanceof Error ? error.message : String(error);
         }
       }

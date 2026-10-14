@@ -49,16 +49,21 @@ describe("Eh translated metadata", () => {
     expect(ehDisplayValue({ ...gallery, artist_display: [] }, "artist", "1-gou")).toBe("1-gou");
   });
 
-  it("sorts independently by local library time", () => {
+  it("defaults to newest admission first and keeps publication sorting independent", () => {
     const store = useEhLibraryStore();
     const older = { ...gallery, gid: 2, title: "较晚发布", posted: "2026-08-01", added_at: "2026-08-01 10:00:00" };
     const newer = { ...gallery, gid: 3, title: "较早发布但刚入库", posted: "2010-01-01", added_at: "2026-09-01 10:00:00" };
     store.galleries = [older, newer];
 
-    store.toggleAddedSort();
     expect(store.currentSort).toBe("added-desc");
     expect(store.filteredGalleries.map((item) => item.gid)).toEqual([3, 2]);
     store.toggleAddedSort();
+    expect(store.currentSort).toBe("added-asc");
+    expect(store.filteredGalleries.map((item) => item.gid)).toEqual([2, 3]);
+    store.toggleAddedSort();
+    expect(store.filteredGalleries.map((item) => item.gid)).toEqual([3, 2]);
+    store.toggleTimeSort();
+    expect(store.currentSort).toBe("time-desc");
     expect(store.filteredGalleries.map((item) => item.gid)).toEqual([2, 3]);
   });
 

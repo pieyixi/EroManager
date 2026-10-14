@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 fn validate_delete_target(root: &Path, folder: &Path) -> Result<PathBuf, String> {
     let root = root
         .canonicalize()
-        .map_err(|error| format!("无法解析 Eh 库目录：{error}"))?;
+        .map_err(|error| format!("无法解析 本子库目录：{error}"))?;
     let folder = folder
         .canonicalize()
         .map_err(|error| format!("无法解析作品目录：{error}"))?;
     if folder == root || !folder.starts_with(&root) {
-        return Err(format!("拒绝删除 Eh 库范围外的目录：{}", folder.display()));
+        return Err(format!("拒绝删除 本子库范围外的目录：{}", folder.display()));
     }
     Ok(folder)
 }

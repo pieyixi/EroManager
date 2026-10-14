@@ -82,7 +82,7 @@ fn existing_target(
         .canonicalize()
         .map_err(|error| format!("无法解析已有作品目录: {error}"))?;
     if canonical == root || !canonical.starts_with(root) {
-        return Err("已有作品目录不在当前 Eh 库根目录内，已拒绝下载".to_string());
+        return Err("已有作品目录不在当前 本子库根目录内，已拒绝下载".to_string());
     }
     Ok(Some(canonical))
 }

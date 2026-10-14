@@ -23,7 +23,7 @@ pub(crate) fn eh_db_path() -> PathBuf {
 pub(crate) fn open_eh_db() -> Result<Connection, String> {
     let path = eh_db_path();
     let connection = Connection::open(&path)
-        .map_err(|error| format!("无法打开 Eh 数据库 {}: {error}", path.display()))?;
+        .map_err(|error| format!("无法打开 本子数据库 {}: {error}", path.display()))?;
     initialize_eh_schema(&connection)?;
     Ok(connection)
 }
@@ -147,12 +147,12 @@ pub(crate) fn read_eh_settings(connection: &Connection) -> Result<EhSettings, St
 pub(crate) fn validate_root(root_path: &str) -> Result<PathBuf, String> {
     let root = PathBuf::from(root_path.trim());
     if root_path.trim().is_empty() {
-        return Err("Eh 库目录不能为空".to_string());
+        return Err("本子库目录不能为空".to_string());
     }
     if !root.is_dir() {
-        return Err(format!("Eh 库目录不存在: {}", root.display()));
+        return Err(format!("本子库目录不存在: {}", root.display()));
     }
-    fs::canonicalize(&root).map_err(|error| format!("无法读取 Eh 库目录: {error}"))
+    fs::canonicalize(&root).map_err(|error| format!("无法读取 本子库目录: {error}"))
 }
 
 pub(crate) fn upsert_gallery(
@@ -218,7 +218,7 @@ pub(crate) fn gallery_folder(connection: &Connection, gid: i64) -> Result<PathBu
         .optional()
         .map_err(|error| error.to_string())?
         .map(PathBuf::from)
-        .ok_or_else(|| format!("Eh 数据库中不存在 GID {gid}"))
+        .ok_or_else(|| format!("本子数据库中不存在 GID {gid}"))
 }
 
 #[cfg(test)]

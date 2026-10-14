@@ -1,28 +1,25 @@
-#page-eh-download.active{overflow:auto}
-.eh-download-workspace{width:100%;min-width:0;min-height:100%;padding:22px 28px 36px}
-.eh-download-lanes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:18px;width:100%;max-width:1660px;margin:0 auto}
-.eh-download-lane{min-width:0;padding:22px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 8px 30px rgba(21,33,54,.035)}
-.eh-download-lane-head{display:flex;align-items:center;gap:12px;min-height:44px}
-.eh-download-lane-brand{display:grid;place-items:center;width:38px;height:38px;flex:0 0 38px;border-radius:11px;background:linear-gradient(145deg,#4e79e9,#2556d5);color:#fff;font-size:20px;font-weight:760;box-shadow:0 5px 14px rgba(48,93,201,.2)}
-.eh-download-lane-brand.hitomi{background:linear-gradient(145deg,#7a6ad3,#52409f);box-shadow:0 5px 14px rgba(92,76,161,.2)}
+#page-eh-download.active{overflow:hidden}
+.eh-download-workspace{display:flex;flex:1;width:100%;min-width:0;min-height:0;padding:22px 28px 36px;overflow:hidden}
+.eh-download-lanes{display:grid;flex:1;min-height:0;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:minmax(0,1fr);align-items:stretch;gap:18px;width:100%;max-width:1660px;margin:0 auto}
+.eh-download-lane{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;padding:22px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 8px 30px rgba(21,33,54,.035)}
+.eh-download-lane-head{display:flex;flex-shrink:0;align-items:center;gap:12px;min-height:22px}
 .eh-download-lane-heading{min-width:0}
 .eh-download-lane-heading h2{color:var(--text-strong);font-size:16px;font-weight:700;line-height:1.2}
-.eh-download-lane-heading p{margin-top:4px;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .eh-download-lane-count{margin-left:auto;color:var(--muted);font-size:10px;white-space:nowrap}
-.eh-download-lane-form{margin-top:18px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--subtle-bg)}
-.eh-download-lane-fields{display:grid;align-content:start;min-height:78px;gap:10px}
-.eh-download-lane-fields label{display:grid;grid-template-columns:48px minmax(0,1fr);align-items:center;gap:8px;color:var(--text-secondary);font-size:12px}
+.eh-download-lane-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px;align-items:start;flex-shrink:0;margin-top:12px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--subtle-bg)}
+.eh-download-lane-fields{display:grid;grid-template-columns:minmax(0,1fr);align-content:start;min-height:78px;gap:10px}
+.eh-download-lane-fields label{display:grid;grid-template-columns:34px minmax(0,1fr);align-items:center;gap:8px;color:var(--text-secondary);font-size:12px}
+.eh-download-lane-fields label>span{text-align:left}
 .eh-download-lane-fields input{width:100%;min-width:0}
-.eh-download-lane-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.eh-download-lane-actions{display:grid;justify-items:end;gap:10px}
 .eh-download-lane-actions button{min-width:88px;height:34px}
 .eh-download-lane-actions .btn-primary:not(.download-clear-button){color:#fff}
 .eh-download-lane-actions .download-clear-button{border-color:var(--line-strong);background:#fff;color:#374151;box-shadow:none}
 .eh-download-lane-actions .download-clear-button:hover:not(:disabled){border-color:#b8c0ca;background:#f9fafb;box-shadow:0 4px 10px rgba(27,39,64,.08);transform:translateY(-1px)}
-/* 仅有消息时才占一行；覆盖通用消息外边距，不按屏幕高度预留空白。 */
-.eh-download-lane-feedback{height:34px;margin-top:8px}
-.eh-download-lane-feedback .settings-msg{height:34px;overflow:auto;margin:0;padding:7px 10px;font-size:11px;line-height:18px;overflow-wrap:anywhere}
-.eh-download-lane-group{min-width:0;margin-top:20px}
-.eh-download-lane-group>header{display:flex;align-items:baseline;gap:9px;margin-bottom:12px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+.eh-download-lane-group{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;margin-top:20px}
+.eh-download-lane-group>header{display:flex;flex-shrink:0;align-items:baseline;gap:9px;margin-bottom:12px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+/* 上方输入与记录栏固定，左右只在各自卡片区滚动，触底不串到另一栏或整页。 */
+.eh-download-lane-results{flex:1;min-height:0;overflow-y:auto;overscroll-behavior-y:contain;scrollbar-gutter:stable;padding-bottom:2px}
 .eh-download-lane-group>header h3{color:var(--text-strong);font-size:13px;font-weight:700}
 .eh-download-lane-group>header span{color:var(--muted);font-size:10px}
 .eh-download-lane-empty{display:grid;min-height:84px;place-items:center;padding:16px;border:1px dashed var(--line-strong);border-radius:9px;color:var(--muted);font-size:11px;text-align:center}
@@ -30,6 +27,8 @@
 .eh-download-card{min-width:0;padding:7px;border:1px solid var(--line);border-radius:9px;background:var(--surface);box-shadow:0 3px 10px rgba(20,31,48,.035)}
 .eh-download-poster{position:relative;width:100%;aspect-ratio:3/4;overflow:hidden;border-radius:6px;background:var(--media-bg)}
 .eh-download-poster img{display:block;width:100%;height:100%;object-fit:cover}
+.eh-download-cover-link{position:absolute;inset:0;width:100%;height:100%;padding:0;border:0;border-radius:inherit;background:transparent;cursor:pointer}
+.eh-download-cover-link:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
 .eh-download-cover-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;width:100%;height:100%;background:radial-gradient(circle at 32% 28%,color-mix(in srgb,var(--primary) 11%,var(--media-bg)),var(--media-bg) 72%);color:var(--soft)}
 .eh-download-cover-placeholder .fluent-icon{font-size:32px}
 .eh-download-cover-placeholder small{max-width:90%;font-size:10px;text-align:center}
@@ -65,5 +64,5 @@
 .eh-download-failure-row button{flex:0 0 auto;border:0;background:transparent;color:var(--primary);font:600 11px/1.4 inherit;cursor:pointer}
 :root[data-theme="dark"] .eh-download-lane{box-shadow:0 8px 28px rgba(0,0,0,.1)}
 :root[data-theme="dark"] .eh-download-lane-actions .download-clear-button{border-color:#d1d5db;background:#fff;color:#374151}
-@media(max-width:1050px){.eh-download-lanes{grid-template-columns:1fr}}
-@media(max-width:700px){.eh-download-workspace{padding:14px 12px 24px}.eh-download-lane{padding:15px}.eh-download-lane-head{flex-wrap:wrap}.eh-download-lane-count{width:100%;margin-left:50px}}
+@media(max-width:1050px){#page-eh-download.active{overflow:auto}.eh-download-workspace{display:block;flex:none;overflow:visible}.eh-download-lanes{grid-template-columns:1fr;grid-template-rows:none}.eh-download-lane{height:calc(100dvh - 122px);min-height:480px}}
+@media(max-width:700px){.eh-download-workspace{padding:14px 12px 24px}.eh-download-lane{padding:15px}.eh-download-lane-head{flex-wrap:wrap}.eh-download-lane-count{width:100%;margin-left:0}}

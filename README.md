@@ -23,6 +23,18 @@ Local browsing, playback, and reading work offline. Optional source downloads re
 - Vue 3, TypeScript, Pinia, and Vite
 - libmpv
 
+## Version 5.1
+
+Version 5.1 adds a dedicated discovery home and refines navigation, reading, and download presentation.
+
+- Independent random draws for both catalogs, with no-replacement cycles and recent-repeat protection.
+- Themed card transitions and aspect-ratio-aware previews.
+- A session-only hand of saved draws, with drag collection, cyclic browsing, and temporary removal.
+- Separate home and catalog navigation, plus a sidebar download shortcut that returns to its entry page.
+- Mouse-wheel reader navigation and decoded page staging that keeps the current image visible until the next page is ready.
+- Consistent download-card ordering, compact aligned forms, and cover-only detail navigation.
+- Regression checks for interrupted carousel gestures, responsive layouts, reader presentation, and navigation return paths.
+
 ## Version 5.0
 
 Version 5.0 improves download workflows, reader interactions, and maintainability while preserving the portable, local-first catalog.

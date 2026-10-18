@@ -49,7 +49,6 @@ const pageTitle = computed(
       class="titlebar-drag-region"
       data-tauri-drag-region
       @pointerdown="closeMediaDropdown"
-      @dblclick="toggleMaximize"
     ></div>
     <ShellBrowseToolbar :controls="browse" :page-title="pageTitle" />
     <WindowControls
@@ -64,7 +63,6 @@ const pageTitle = computed(
     v-else-if="isPlayer"
     class="immersive-window-chrome"
     data-tauri-drag-region
-    @dblclick.self="toggleMaximize"
   >
     <WindowControls
       :maximized="maximized"

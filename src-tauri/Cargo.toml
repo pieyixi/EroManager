@@ -1,6 +1,6 @@
 [package]
 name = "ero-manager"
-version = "5.2.0"
+version = "5.3.0"
 edition = "2021"
 default-run = "ero-manager"
 

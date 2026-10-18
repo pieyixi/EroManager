@@ -63,7 +63,7 @@ fn snapshot(
         locked: state.token.is_empty(),
     })
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn account_state(
     db: tauri::State<Database>,
     session: tauri::State<Session>,
@@ -71,7 +71,7 @@ pub fn account_state(
     let state = session.0.lock().map_err(|e| e.to_string())?;
     snapshot(&*db.conn.lock().map_err(|e| e.to_string())?, &state)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn account_auth(
     id: String,
     pin: String,
@@ -100,19 +100,19 @@ pub fn account_auth(
     state.check_attempt()?;
     Err("账号不可用或 PIN 不正确".into())
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn account_lock(session: tauri::State<Session>) -> Result<(), String> {
     session.0.lock().map_err(|e| e.to_string())?.token.clear();
     Ok(())
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn account_logout(session: tauri::State<Session>) -> Result<(), String> {
     let mut state = session.0.lock().map_err(|e| e.to_string())?;
     state.token.clear();
     state.key = None;
     Ok(())
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn account_update_profile(
     scope: String,
     nickname: String,
@@ -156,7 +156,7 @@ pub fn account_update_profile(
         .map_err(|e| e.to_string())?;
     Ok(())
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn account_change_pin(
     scope: String,
     new_pin: String,
@@ -169,7 +169,7 @@ pub fn account_change_pin(
     // 当前账号已经解锁；原位开关/回车修改由此会话授权，PIN仍只保存盐和校验值。
     storage::set_pin(&conn, key, &new_pin)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn account_get_data(
     scope: String,
     kind: String,
@@ -195,7 +195,7 @@ fn validate_kind(kind: &str, item: &str) -> Result<(), String> {
         Err("账号数据类型无效".into())
     }
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn account_set_data(
     scope: String,
     kind: String,

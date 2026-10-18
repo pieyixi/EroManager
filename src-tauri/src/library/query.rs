@@ -2,7 +2,7 @@ use crate::library::database::Database;
 use crate::library::models::*;
 use crate::shared::*;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
@@ -120,7 +120,7 @@ pub fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, 
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_tags(db: State<Database>) -> Result<Vec<Tag>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -149,7 +149,7 @@ pub fn get_tags(db: State<Database>) -> Result<Vec<Tag>, String> {
     Ok(tags)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_studios(db: State<Database>) -> Result<Vec<String>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut statement = conn
@@ -209,7 +209,7 @@ fn imported_work_is_available(
         }))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 

@@ -43,7 +43,7 @@ fn write_character_favorite(
     read_favorite_characters(conn)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_favorite_characters(
     scope: String,
     db: State<Database>,
@@ -59,7 +59,7 @@ pub fn get_favorite_characters(
         "favorite-media",
     )
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_character_favorite(
     scope: String,
     character_name: String,

@@ -480,7 +480,7 @@ fn configure_media_library(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn initialize_media_library(db: State<Database>) -> Result<MediaLibraryStatus, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let configured_id = read_setting(&conn, SETTING_LIBRARY_ID);
@@ -518,7 +518,7 @@ pub fn initialize_media_library(db: State<Database>) -> Result<MediaLibraryStatu
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn bind_media_library(
     root_path: String,
     db: State<Database>,

@@ -39,6 +39,8 @@ pub fn run() {
                 window_bounds::clamp_after_dpi_change(window);
             }
         })
+        // 启动查询、账号及偏好命令用 command(async) 在运行时线程池调度，
+        // 包括等待共享数据库锁与结果序列化；不能让它们占用原生窗口消息线程。
         .invoke_handler(tauri::generate_handler![
             crate::accounts::account_state,
             crate::accounts::account_auth,

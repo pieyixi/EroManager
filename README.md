@@ -23,6 +23,15 @@ Local browsing, playback, and reading work offline. Optional source downloads re
 - Vue 3, TypeScript, Pinia, and Vite
 - libmpv
 
+## Version 5.3
+
+Version 5.3 keeps window interactions responsive while startup data and covers are prepared.
+
+- Catalog queries, directory checks, account operations, and shared database-lock waits run outside the native window event thread.
+- Startup blank areas support dragging, with a single native double-click maximize action.
+- Window maximize, restore, resize, and minimize remain available during loading.
+- Cover readiness, the initial home draw, and the startup fade retain their existing sequence.
+
 ## Version 5.2
 
 Version 5.2 improves startup presentation, catalog statistics, profiles, and navigation while preserving portable local storage.

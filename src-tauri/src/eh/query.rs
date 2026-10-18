@@ -3,7 +3,7 @@ use crate::eh::database::{eh_db_path, open_eh_db, read_eh_settings};
 use crate::eh::metadata::localize_gallery;
 use crate::eh::models::*;
 use rusqlite::Connection;
-#[tauri::command]
+#[tauri::command(async)]
 pub fn eh_get_library_overview() -> Result<EhLibraryOverview, String> {
     let connection = open_eh_db()?;
     let settings = read_eh_settings(&connection)?;
@@ -33,7 +33,7 @@ pub async fn eh_get_library_dashboard() -> Result<EhLibraryDashboard, String> {
     .map_err(|error| error.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn eh_list_local_galleries() -> Result<Vec<EhGallerySummary>, String> {
     let connection = open_eh_db()?;
     list_local_galleries(&connection)

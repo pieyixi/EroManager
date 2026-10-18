@@ -39,7 +39,7 @@ fn write_favorite(conn: &Connection, gid: i64, favorite: bool) -> Result<bool, S
     Ok(favorite)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn eh_get_favorite_galleries(
     scope: String,
     db: tauri::State<crate::library::database::Database>,
@@ -69,7 +69,7 @@ pub fn eh_get_favorite_galleries(
         })
         .collect())
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn eh_set_gallery_favorite(
     scope: String,
     gid: i64,

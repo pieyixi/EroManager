@@ -152,12 +152,12 @@ where
     report_progress(total, total, "扫描完成");
     Ok(result)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn eh_get_settings() -> Result<EhSettings, String> {
     read_eh_settings(&open_eh_db()?)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn eh_save_settings(input: SaveEhSettingsInput) -> Result<EhSettings, String> {
     let connection = open_eh_db()?;
     let root = validate_root(&input.root_path)?;
@@ -168,7 +168,7 @@ pub fn eh_save_settings(input: SaveEhSettingsInput) -> Result<EhSettings, String
     read_eh_settings(&connection)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn eh_bind_local_library(root_path: String) -> Result<EhSettings, String> {
     let connection = open_eh_db()?;
     let root = validate_root(&root_path)?;

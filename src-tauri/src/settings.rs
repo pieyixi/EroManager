@@ -177,7 +177,7 @@ fn save_record(conn: &Connection, record: WorkRecord) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_user_preferences(
     scope: String,
     db: tauri::State<Database>,
@@ -198,7 +198,7 @@ pub fn get_user_preferences(
     preferences.close_prompt = global.close_prompt;
     Ok(preferences)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_user_preferences(
     scope: String,
     preferences: UserPreferences,
@@ -227,7 +227,7 @@ pub fn set_user_preferences(
     write_preferences(&conn, global)?;
     Ok(preferences)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_work_record(
     scope: String,
     kind: String,
@@ -245,7 +245,7 @@ pub fn get_work_record(
     .map(|raw| serde_json::from_str(&raw).map_err(|e| e.to_string()))
     .transpose()
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_work_record(
     scope: String,
     record: WorkRecord,

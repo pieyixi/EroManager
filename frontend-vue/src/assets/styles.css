@@ -7,6 +7,6 @@
 @import './styles/06-theme.css';
 @import './styles/07-settings.css';
 @import './styles/08-responsive.css';
-@import './styles/09-eh-download.css';
-@import './styles/10-home.css';
-@import './styles/11-home-hand.css';
+@import './styles/downloads.css';
+@import './styles/home.css';
+@import './styles/settings.css';

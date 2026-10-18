@@ -1,17 +1,36 @@
 use crate::library::database::init_db;
 use crate::{eh, library, media, player, system};
+use tauri::Emitter;
+mod tray;
 
 #[cfg(windows)]
 mod window_bounds;
 
 pub fn run() {
     let db = init_db();
+    let session = {
+        let mut conn = db.conn.lock().expect("database lock");
+        crate::accounts::initialize(&mut conn, true)
+            .expect("account migration failed; original data preserved");
+        crate::accounts::Session::new(&conn).expect("account session")
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_libmpv::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(db)
+        .manage(session)
+        .setup(|app| {
+            tray::setup(app)?;
+            crate::accounts::install_privacy(app.handle());
+            crate::accounts::install_admin_service(app.handle());
+            Ok(())
+        })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.emit("app-close-requested", ());
+            }
             if let tauri::WindowEvent::Focused(focused) = event {
                 player::window::sync_player_fullscreen_focus(window, *focused);
             }
@@ -21,6 +40,20 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            crate::accounts::account_state,
+            crate::accounts::account_auth,
+            crate::accounts::account_lock,
+            crate::accounts::account_logout,
+            crate::accounts::account_update_profile,
+            crate::accounts::account_change_pin,
+            crate::accounts::account_get_data,
+            crate::accounts::account_set_data,
+            crate::settings::get_user_preferences,
+            crate::settings::set_user_preferences,
+            crate::settings::get_work_record,
+            crate::settings::set_work_record,
+            crate::settings::get_application_info,
+            tray::apply_close_action,
             library::query::get_all_works_with_tags,
             library::query::get_work_detail,
             library::favorites::get_favorite_characters,
@@ -66,6 +99,8 @@ pub fn run() {
             eh::query::eh_get_library_overview,
             eh::query::eh_get_library_dashboard,
             eh::query::eh_list_local_galleries,
+            eh::favorites::eh_get_favorite_galleries,
+            eh::favorites::eh_set_gallery_favorite,
             eh::delete::eh_delete_gallery_record,
             eh::delete::eh_delete_gallery_folder,
             eh::reader::eh_get_gallery_pages,

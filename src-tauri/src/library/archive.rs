@@ -321,7 +321,7 @@ mod archive_data_dir_tests {
     #[test]
     fn creates_data_once_without_touching_existing_files() {
         let root = std::env::temp_dir().join(format!(
-            "hanime-manager-data-dir-test-{}-{}",
+            "ero-manager-data-dir-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -343,7 +343,7 @@ mod archive_data_dir_tests {
     #[test]
     fn rejects_a_data_file_without_replacing_it() {
         let root = std::env::temp_dir().join(format!(
-            "hanime-manager-data-file-test-{}-{}",
+            "ero-manager-data-file-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

@@ -1,110 +1,110 @@
 # Frontend Architecture
 
-The Vue migration is complete. Visual behavior and the Rust command contract remain stable while application state, rendering, navigation, and playback controls are owned by typed Vue modules.
+Product identity: **裏界箱庭** (display name), **ero-manager** (project and executable), **ero_manager_lib** (Rust library artifact). Existing workspace/portable directories, `com.hanime.manager` storage identity, `.hanime-library.json` marker, historical AppData discovery path and backup-format identifiers are compatibility contracts, not visible branding. Keep them stable to preserve settings, histories and existing libraries. The `hanime_url` field describes source metadata and is not a product name.
 
-## Enforced Rules
+The active frontend is Vue 3 + TypeScript. Directory ownership follows existing responsibilities; this structure does not change routes, command names, DTOs, databases, portable paths, or product behavior.
 
-- Business behavior is never registered on `window`.
-- Application data is rendered by Vue templates, never HTML strings.
-- Stores own shared state; components own template refs and presentation-only measurements.
-- Application-wide DOM lookup is forbidden.
-- The native playback layout may measure only its registered stage and controls refs.
-- Page transitions and library refreshes are driven by reactive state.
-- Every production build runs unit tests, architecture checks, the UI contract, TypeScript, and Vite.
-
-## Current Structure
+## Responsibility Map
 
 ```text
 src/
-|-- App.vue                         Application composition and runtime lifetime
-|-- main.ts                         Vue, Pinia, and root mount
-|-- api/
-|   |-- tauri.ts                    Runtime-selecting backend adapter
-|   |-- contracts/                  Rust-facing DTOs shared by stores and mocks
-|   |-- commands/                   One typed wrapper per backend command family
-|   `-- webMock.ts                  Development-only browser contract fixtures
+|-- App.vue                    Route composition and application lifetime
+|-- pages/                     Ten route-level page components
+|   |-- HomePage.vue            Independent media/book draws and temporary hand
+|   |-- MediaLibraryPage.vue    Media browsing, sorting and pagination
+|   |-- EhLibraryPage.vue       Book browsing (internal eh identifiers retained)
+|   |-- EhDownloadPage.vue      Shared second-level download workspace
+|   |-- EhReaderPage.vue        Reading UI and reader-specific window behavior
+|   |-- DetailPage.vue          Existing media/book details
+|   |-- PlayerPage.vue          Playback UI and explicit native stage refs
+|   |-- SettingsPage.vue        Binding, scans and maintenance
+|   |-- UnarchivedPage.vue      Incomplete entries
+|   `-- ArchivePage.vue        Metadata authoring
 |-- components/
-|   |-- HomePage.vue                Library grid, filters, sorting, pagination
-|   |-- EhLibraryPage.vue           Local gallery overview and organization states
-|   |-- DetailPage.vue              Metadata and episode rendering
-|   |-- PlayerPage.vue              Reactive playback UI and registered refs
-|   |-- UnarchivedPage.vue          Incomplete-entry list and A-Z navigation
-|   |-- ArchivePage.vue             Metadata authoring workspace
-|   |-- SettingsPage.vue            Library console, synchronization, backups
-|   `-- GlobalOverlays.vue          Confirmation modal and context menu
-|-- stores/
-|   |-- navigation.ts               Pages, confirmation state, context menu
-|   |-- library.ts                  Works, covers, filters, detail, pagination
-|   |-- archive.ts                  Incomplete folders and authoring workflow
-|   |-- libraryConsole.ts           Main-library binding, scans, imports, updates, backups
-|   |-- ehSettings.ts               Eh binding, credentials, scans, and dashboard
-|   |-- ehDownload.ts               Cross-source FIFO queue, progress, retries, and source-specific history
-|   |-- ehLibrary.ts                Local gallery browsing and metadata workflow
-|   `-- player.ts                   Playback and timeline-preview state
-|-- features/player/
-|   |-- commands.ts                 Typed command boundary used by pages
-|   |-- controller.ts               libmpv session and transport orchestration
-|   |-- layout.ts                   Native child-window geometry synchronization
-|   |-- thumbnails.ts               Adaptive preview extraction and memory cache
-|   |-- model.ts                    Pure display and playlist rules
-|   `-- mpv.ts                      libmpv plugin adapter
-`-- runtime/
-    |-- startApplication.ts         Runtime assembly and cleanup
-    `-- applicationEvents.ts        Global keyboard and window events
+|   |-- shell/                 AppShell, sidebar, browse toolbar, dropdowns, overlays
+|   |-- shared/                Domain-independent back and window controls
+|   |-- home/                  Draw cards, hand deck and muted animated sky
+|   `-- downloads/             Source lane and failed-page popover
+|-- features/
+|   |-- shell/                 Search/filter and ordinary-window UI controllers
+|   |-- home/                  Cohesive draw/hand gestures, layout and random pools
+|   |-- reader/                Image presentation and navigation preparation
+|   |-- player/                libmpv controller, layout, previews and adapter
+|   `-- theme/                 Document-level theme transition
+|-- stores/                    Shared state and business workflows
+|-- api/
+|   |-- contracts/             Backend DTOs, also used by browser fixtures
+|   |-- commands/              Typed backend command families
+|   |-- tauri.ts               Runtime-selecting adapter
+|   `-- webMock.ts             Development-only browser implementation
+|-- runtime/                   Application startup, keyboard and window events
+`-- assets/
+    |-- home/                  Approved card-back images
+    |-- styles.css             Ordered global stylesheet entry
+    `-- styles/                Eight shared slices, home, downloads and scoped reader
 ```
 
-Tests are colocated with their domain modules as `*.test.ts`.
+Pages compose business components. Business components stay with their actual domain rather than a generic shared directory. Shared components receive presentation state/events and do not import stores, APIs or domain features. Create a new domain directory only when several related files actually need one.
 
-## Dependency Direction
+## Shell Boundary
 
-```text
-Vue page/component
-        |
-        v
-Pinia store or typed feature command
-        |
-        v
-Tauri API / libmpv adapter
-        |
-        v
-Rust command or plugin
+`components/shell/AppShell.vue` assembles navigation, titlebar fragments, dropdowns and immersive chrome. `AppSidebar.vue` owns sidebar rendering and its navigation actions; `ShellBrowseToolbar.vue` owns filters, sort controls and search markup without introducing a wrapper element.
+
+`features/shell/useShellBrowseControls.ts` owns the existing search/filter interaction, dropdown positioning, outside-click handling and route cleanup as one controller. It lives for the shell's lifetime even while immersive routes hide the toolbar. Search input/container refs are passed explicitly from the toolbar; measurement and document listeners never move into Pinia.
+
+`features/shell/useShellWindowControls.ts` owns ordinary titlebar minimize, maximize, restore, close and resize subscription. Reader fullscreen and the native player controller remain separate. `components/shared/WindowControls.vue` only renders buttons and emits actions.
+
+## State and Native Boundaries
+
+- `navigation`: routes, return origins, confirmation and context menus.
+- `library` / `ehLibrary`: independent browsing filters, sorting, pagination and details.
+- Book favorites belong to `ehLibrary` and `eh/favorites.rs`, through typed `ehApi` commands. Detail identity buttons reuse character-favorite styling, while the book toolbar star filters signed gallery IDs. The additive SQLite table preserves favorites across restarts and rescans, separates same-number sources, and removes entries when their gallery records are deleted. Category/language metadata and home random pools remain unchanged.
+- `home` / `homeHand`: independent no-replacement draws and process-local hand entries.
+- `archive` / `libraryConsole`: authoring, binding, scans, imports and maintenance.
+- `ehSettings`: binding, credentials, scan state and dashboard only.
+- `ehDownload`: source inputs, independent Eh/Hitomi FIFO workers, process-local credentials, retries and credential-free history. Both sources may download one work simultaneously (three image transfers per work); aggregate activity stays true until both are idle. Per-source progress uses signed identities, and overlapping completion events coalesce serialized shared-library refreshes. Card stack order is independent of execution order.
+- `ehReader`: reading state; presentation and local UI geometry stay outside the store.
+- `player`: playback state coordinated by the existing player feature modules.
+
+Keep the cohesive home gestures, draw stages, carousel, hold/removal and reader presentation state machines intact. File length alone is not a reason to split them. This cleanup relocates their rendering components without changing those state machines.
+
+The libmpv child window is not a Vue DOM node. Player layout measures only its explicitly registered stage/controls refs. Reader fullscreen must not reuse player fullscreen geometry.
+
+## Dependency Rules
+
+- Only `App.vue` imports route pages.
+- Features and stores do not import rendering components.
+- Stores may use pure domain helpers, but not UI composables or shell window/geometry controllers.
+- API modules depend only on their API contracts/adapters, never Pinia or rendering.
+- Shared components remain domain-independent.
+- Imports, re-exports and literal lazy imports are checked. Runtime import cycles are rejected; type-only references do not create runtime cycles.
+- No application-wide DOM queries, generated HTML or business handlers registered on `window`.
+
+In browser development the same typed command contract selects `webMock.ts` only without Tauri and only in development mode. Components have no mock-specific behavior. Production never includes browser mock data as runtime library data.
+
+## Style Ownership
+
+`assets/styles.css` preserves the existing global cascade. The first eight shared slices retain their order; `downloads.css` owns download styling and `home.css` owns the complete home/draw/hand styling, including responsive rules. `reader.css` remains imported with `scoped` by `EhReaderPage.vue`. Directory cleanup must not rename selectors, add wrappers, change layout values or reorder rules.
+
+The greeting remains muted, approved card backs and reveal parameters remain unchanged, and both libraries retain their existing navigation/filter state.
+
+## Verification
+
+`npm run build` runs unit tests, architecture checks, command/response parity, recursive Vue-template ID parity, strict Vue TypeScript and Vite. `npm run check:architecture` enforces import direction, component/page ownership, runtime-cycle detection, DOM rules and justified file-size exceptions.
+
+Tests are colocated as `*.test.ts`; architecture-check tests live beside the scripts.
+
+For structural work, capture the original source first, then compare the refactor:
+
+```powershell
+node scripts/verify-frontend-structure.cjs --before
+node scripts/verify-frontend-structure.cjs --after
 ```
 
-In browser development, the final two layers are replaced by `webMock.ts`. Components and stores use the same command contract in both modes and must not branch on the runtime. The mock is available only under Vite development mode when no Tauri runtime exists.
+`HAND_QA_URL` selects the preview server. Reports and screenshots go to a task-specific directory under the system temporary folder. The harness compares flattened CSS and visible DOM/text/geometry at 1920x1080, 1366x768 and 1280x720, light/dark, across eleven page states; deterministic home fixtures avoid false differences from random draws. It also checks search, dropdown dismissal and return navigation. An original-source server must generate the baseline, not the already-refactored working tree.
 
-Lower layers do not import page components. Stores do not locate DOM elements. Components do not build application markup dynamically.
+Browser checks do not prove native window or libmpv behavior. Verify affected native interactions using an isolated portable runtime and isolated data; never use production data for architecture testing. Publishing and GitHub pushes require a separate explicit user request.
 
-## State Boundaries
+`scripts/verify-shell-native.ps1` accepts an `-ExecutablePath` and `-ReportDirectory`. It only launches a system-temp `ark-structure-native-*` portable copy with a precreated empty database, isolates the WebView profile, exercises navigation and window controls, captures actual desktop pixels, and closes its own test process. Do not pass the production executable.
 
-- `navigation`: active page, confirmation modal, and context menu.
-- `library`: works, filters, sorting, responsive page size, cover cache, and selected detail.
-- `archive`: incomplete folders, index navigation, draft metadata, and cover edits.
-- `libraryConsole`: main-library binding, scan progress, synchronization results, duplicates, and backups.
-- `ehSettings`: Eh path/credentials, scan progress, and dashboard data.
-- `ehDownload`: source-specific inputs, process-local FIFO queue and credentials, progress, failed-page retry, and credential-free local history. `EhDownloadPage`/`EhDownloadLane` render the shared second-level download workspace and per-source cover cards.
-- `player`: playback session, controls, playlist mode, fullscreen state, preview cache, and native viewport masks.
-
-## Native Player Boundary
-
-The libmpv child window is not a Vue DOM node. `layout.ts` receives the video stage and controls through explicit template refs, measures their rectangles, and sends normalized margins to the plugin. It does not query the page or own transport state.
-
-`thumbnails.ts` keeps a bounded in-memory cache, progressive prefetch plan, pointer-velocity prediction, and exact-frame refinement. It updates reactive preview state and never writes to the DOM.
-
-`controller.ts` owns mpv initialization, polling, seeking, loop transitions, fullscreen calls, and capture orchestration. `PlayerPage.vue` owns all visible text, classes, controls, playlist markup, and accessibility state.
-
-`assets/styles.css` is a small ordered entry point. Its numbered files under `assets/styles/` preserve the existing cascade while keeping foundation, page workflows, shell, theme, settings, and responsive rules reviewable in separate files.
-
-## Verification Gates
-
-`npm run build` enforces all frontend gates:
-
-1. Vitest domain tests.
-2. Zero global compatibility bridges.
-3. Zero application DOM queries.
-4. Zero HTML string injection.
-5. Stable UI identifiers and no inline handlers.
-6. Typed command parity between API wrappers, Rust registration, and Web Mock.
-7. Strict Vue TypeScript validation.
-8. Vite production build.
-
-The native verification set additionally covers Rust tests, embedded playback, timeline preview, pointer seeking, pause/resume, next-episode playback, sidebar resizing, fullscreen controls, maximized-window restoration, cross-monitor movement, and return navigation.
+Shared cover navigation lives in `features/shell/detailTransition.ts` and `components/shell/DetailCoverFlight.vue`. Home main/hand cards, media/book grids and completed download cards register local frame/image refs with one compositor. It owns only two temporary transform layers and cancels on unrelated navigation/resize. `useDetailCoverTargets` releases dynamic refs on removal; `usePageScrollPosition` restores each download lane before reverse geometry capture. Pinia owns the typed detail return page, including downloads through reader round-trips, without storing DOM geometry. The download workspace itself continues to return home.

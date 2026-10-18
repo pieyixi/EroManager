@@ -1,4 +1,4 @@
-//! Hitomi download route: three concurrent images, resume, admission and deletion.
+//! Hitomi download route: configurable image concurrency, resume, admission and deletion.
 mod metadata;
 mod protocol;
 mod storage;
@@ -20,14 +20,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Emitter;
 
-const PARALLEL_IMAGES: usize = 3;
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HitomiDownloadInput {
     pub id: i64,
     #[serde(default)]
     pub page_indices: Option<Vec<usize>>,
+    #[serde(default)]
+    pub parallel_images: Option<usize>,
 }
 
 fn selected_pages(input: Option<Vec<usize>>, total: usize) -> Result<Vec<usize>, String> {
@@ -52,6 +52,7 @@ fn progress(app: &tauri::AppHandle, id: i64, done: usize, total: usize, text: &s
     );
 }
 fn download(app: tauri::AppHandle, input: HitomiDownloadInput) -> Result<EhDownloadResult, String> {
+    crate::settings::download_parallelism(input.parallel_images)?;
     let id = input.id;
     parse_id(&id.to_string())?;
     let connection = open_eh_db()?;
@@ -73,6 +74,7 @@ fn download_into<F>(
 where
     F: FnMut(usize, usize, &str),
 {
+    crate::settings::download_parallelism(input.parallel_images)?;
     let id = input.id;
     parse_id(&id.to_string())?;
     let info = get_info(client, id)?;
@@ -99,12 +101,13 @@ where
     F: FnMut(usize, usize, &str),
 {
     let id = input.id;
+    let parallel_images = crate::settings::download_parallelism(input.parallel_images)?;
     let pages = selected_pages(input.page_indices, info.files.len())?;
     let meta = metadata(&info);
     let folder = target(connection, root, id, &meta.title)?;
     let mut failures = Vec::new();
     let mut processed = 0;
-    for chunk in pages.chunks(PARALLEL_IMAGES) {
+    for chunk in pages.chunks(parallel_images) {
         let mut jobs = Vec::new();
         for &page in chunk {
             let path = folder.join(format!("page_{page:04}.webp"));
@@ -206,7 +209,10 @@ pub async fn hitomi_download_gallery(
 }
 
 #[tauri::command]
-pub fn hitomi_delete_gallery_folder(id: i64) -> Result<(), String> {
+pub fn hitomi_delete_gallery_folder(
+    id: i64,
+    db: tauri::State<crate::library::database::Database>,
+) -> Result<(), String> {
     parse_id(&id.to_string())?;
     let connection = open_eh_db()?;
     let settings = read_eh_settings(&connection)?;
@@ -251,6 +257,7 @@ pub fn hitomi_delete_gallery_folder(id: i64) -> Result<(), String> {
             [id.to_string()],
         )
         .map_err(|e| format!("文件已删除，但移除数据库记录失败: {e}"))?;
+    crate::accounts::forget_gallery(&*db.conn.lock().map_err(|e| e.to_string())?, -id)?;
     Ok(())
 }
 
@@ -351,9 +358,10 @@ mod tests {
     #[test]
     #[ignore = "explicit network smoke test; downloads three sample images into memory only"]
     fn current_site_metadata_and_image_route() {
+        const SAMPLE_IMAGES: usize = 3;
         let client = client().unwrap();
         let info = get_info(&client, 1469394).unwrap();
-        assert!(info.files.len() >= PARALLEL_IMAGES);
+        assert!(info.files.len() >= SAMPLE_IMAGES);
         let bytes = fetch(
             &client,
             &format!("https://{DATA_HOST}/gg.js"),
@@ -363,7 +371,7 @@ mod tests {
         .unwrap();
         let gg = Gg::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
         std::thread::scope(|scope| {
-            let workers: Vec<_> = info.files[..PARALLEL_IMAGES]
+            let workers: Vec<_> = info.files[..SAMPLE_IMAGES]
                 .iter()
                 .map(|file| {
                     let url = gg.image_url(&file.hash).unwrap();
@@ -428,6 +436,7 @@ mod tests {
             &root,
             &client,
             HitomiDownloadInput {
+                parallel_images: Some(3),
                 id: 1469394,
                 page_indices: None,
             },
@@ -477,6 +486,7 @@ mod tests {
             &root,
             &client,
             HitomiDownloadInput {
+                parallel_images: Some(3),
                 id: 1469394,
                 page_indices: Some(vec![1, 2, 3]),
             },
@@ -499,6 +509,7 @@ mod tests {
             &root,
             &client,
             HitomiDownloadInput {
+                parallel_images: Some(3),
                 id: 1469394,
                 page_indices: Some(vec![2]),
             },

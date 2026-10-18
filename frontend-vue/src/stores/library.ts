@@ -1,3 +1,4 @@
+import { accountScope } from '../api/accountContext';
 import { defineStore } from 'pinia';
 import { libraryApi } from '../api/commands/library';
 import { mediaApi } from '../api/commands/media';
@@ -7,7 +8,6 @@ import { type DetailReturnPage, useNavigationStore } from './navigation';
 
 export type FilterKey = 'year' | 'studio' | 'story' | 'attr' | 'scene';
 export type SortKey = 'time-desc' | 'time-asc' | 'name-asc' | 'name-desc';
-export type PaginationItem = number | 'ellipsis';
 
 export interface FilterOption {
   value: string;
@@ -127,19 +127,6 @@ export function filterWorks(
   });
 }
 
-export function paginationItems(currentPage: number, totalPages: number): PaginationItem[] {
-  const items: PaginationItem[] = [];
-  let ellipsisAdded = false;
-  for (let page = 1; page <= totalPages; page += 1) {
-    if (page === currentPage || page === 1 || page === totalPages || Math.abs(page - currentPage) <= 2) items.push(page);
-    else if (!ellipsisAdded) {
-      items.push('ellipsis');
-      ellipsisAdded = true;
-    }
-  }
-  return items;
-}
-
 export function coverPathsForWorks(works: WorkSummary[]): string[] {
   return [...new Set(works.map((work) => work.cover_path).filter((path): path is string => Boolean(path)))];
 }
@@ -187,9 +174,6 @@ export const useLibraryStore = defineStore('library', {
       const page = Math.min(this.currentPage, this.totalPages);
       const start = (page - 1) * this.pageSize;
       return this.filteredWorks.slice(start, start + this.pageSize);
-    },
-    pageItems(): PaginationItem[] {
-      return paginationItems(this.currentPage, this.totalPages);
     },
     hasActiveFilters(state): boolean {
       return Object.values(state.activeFilters).some((selected) => Object.keys(selected).length > 0);
@@ -263,7 +247,10 @@ export const useLibraryStore = defineStore('library', {
       this.favoriteCharacterSaving.push(normalized);
       try {
         const favorite = !this.isFavoriteCharacter(normalized);
-        this.favoriteCharacters = await libraryApi.setCharacterFavorite(normalized, favorite);
+        const owner = accountScope();
+        const names = await libraryApi.setCharacterFavorite(normalized, favorite);
+        if (owner !== accountScope()) return;
+        this.favoriteCharacters = names;
         if (!this.favoriteCharacters.length) this.favoriteCharacterMode = false;
         this.currentPage = 1;
       } catch (error) {
@@ -376,7 +363,8 @@ export const useLibraryStore = defineStore('library', {
     resetHomeFilters(): void {
       this.clearSearchAndFilters();
     },
-    async initialize(): Promise<void> {
+    async initialize(options: { deferCoverPrefetch?: boolean } = {}): Promise<void> {
+      const owner = accountScope();
       this.loading = this.works.length === 0;
       this.disconnected = false;
       this.error = '';
@@ -390,7 +378,7 @@ export const useLibraryStore = defineStore('library', {
         this.works = works || [];
         this.tags = tags || [];
         this.studios = studios || [];
-        this.favoriteCharacters = favoriteCharacters || [];
+        if (owner === accountScope()) this.favoriteCharacters = favoriteCharacters || [];
         if (!this.favoriteCharacters.length) this.favoriteCharacterMode = false;
         const years = new Set<number>();
         this.works.forEach((work) => releaseDates(work).forEach((date) => {
@@ -398,7 +386,7 @@ export const useLibraryStore = defineStore('library', {
           if (Number.isFinite(year)) years.add(year);
         }));
         this.years = [...years].sort((left, right) => right - left);
-        void this.prefetchCovers();
+        if (!options.deferCoverPrefetch) void this.prefetchCovers();
       } catch (error) {
         console.error('library initialization failed:', error);
         this.error = '请检查 Tauri 后端是否正常运行';
@@ -421,11 +409,11 @@ export const useLibraryStore = defineStore('library', {
       this.disconnected = true;
       this.error = '';
     },
-    async showDetail(workId: number, returnPage?: DetailReturnPage): Promise<void> {
+    async showDetail(workId: number, returnPage?: DetailReturnPage, prepared?: WorkDetail): Promise<void> {
       const navigation = useNavigationStore();
       const revision = navigation.pageRevision;
       try {
-        const detail = await libraryApi.getWorkDetail(workId);
+        const detail = prepared?.work.id === workId ? prepared : await libraryApi.getWorkDetail(workId);
         if (!detail?.work) return;
         if (returnPage && navigation.pageRevision !== revision) return;
         await this.loadCovers([detail.work.cover_path, ...detail.episodes.map((episode) => episode.cover_path)].filter((path): path is string => Boolean(path)));

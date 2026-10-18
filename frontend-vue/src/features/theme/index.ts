@@ -10,6 +10,17 @@ const themeStorageKey = 'media-library-theme';
 const themeTransitionDuration = 480;
 const themeTransitionEasing = 'cubic-bezier(.22,.8,.28,1)';
 let themeTransitionRunning = false;
+let softTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function transitionThemeSoft(commit: () => void): void {
+  clearTimeout(softTimer);
+  const root = document.documentElement;
+  root.dataset.themeSoft = 'true';
+  // 先应用过渡规则，再切换颜色；不创建整页快照或圆形遮罩。
+  void root.offsetWidth;
+  commit();
+  softTimer = setTimeout(() => { delete root.dataset.themeSoft; }, 260);
+}
 
 function applyTheme(theme: ColorTheme): void {
   document.documentElement.dataset.theme = theme;
@@ -17,6 +28,9 @@ function applyTheme(theme: ColorTheme): void {
 }
 
 export function storedTheme(): ColorTheme {
+  if (window.localStorage.getItem('media-library-theme-mode') === 'system') {
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
   return window.localStorage.getItem(themeStorageKey) === 'dark' ? 'dark' : 'light';
 }
 
@@ -57,6 +71,8 @@ export function transitionTheme(
   commit: () => void,
 ): void {
   if (themeTransitionRunning) return;
+  clearTimeout(softTimer);
+  delete document.documentElement.dataset.themeSoft;
   const startViewTransition = (document as unknown as {
     startViewTransition?: (callback: () => void) => { ready: Promise<void>; finished: Promise<void> };
   }).startViewTransition?.bind(document);

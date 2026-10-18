@@ -24,6 +24,7 @@ export function useCardTransfer(target: () => HandDropTarget | null, collect: (s
   const overTarget = ref(false);
   let capture: HTMLElement | null = null;
   let suppressClick = false;
+  let suppressedClickTarget: HTMLElement | null = null;
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
 
   function release(): void {
@@ -43,6 +44,7 @@ export function useCardTransfer(target: () => HandDropTarget | null, collect: (s
     const element = event.currentTarget as HTMLElement;
     const rect = element.getBoundingClientRect();
     suppressClick = false;
+    suppressedClickTarget = null;
     capture = element;
     element.setPointerCapture(event.pointerId);
     transfer.value = { source, selection, pointer: event.pointerId, startX: event.clientX, startY: event.clientY,
@@ -56,6 +58,7 @@ export function useCardTransfer(target: () => HandDropTarget | null, collect: (s
     if (state.phase === 'pending' && Math.hypot(dx, dy) < 8) return;
     state.phase = 'dragging';
     suppressClick = true;
+    suppressedClickTarget = capture;
     state.x = state.origin.left + dx;
     state.y = state.origin.top + dy;
     overTarget.value = target()?.containsPoint(event.clientX, event.clientY) || false;
@@ -84,8 +87,10 @@ export function useCardTransfer(target: () => HandDropTarget | null, collect: (s
   }
   function allowDraw(event: MouseEvent): boolean {
     if (event.detail === 0) return true;
-    const allowed = !suppressClick;
+    // 自动补抽会禁用原主牌，浏览器可能不再派发它的 click；不能因此吞掉另一侧的点击。
+    const allowed = !suppressClick || event.currentTarget !== suppressedClickTarget;
     suppressClick = false;
+    suppressedClickTarget = null;
     return allowed;
   }
   const ghostStyle = computed(() => {

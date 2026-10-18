@@ -1,3 +1,4 @@
+import { accountScope, trackAccountWrite } from '../accountContext';
 import { invokeTauri } from '../tauri';
 import type {
   DuplicateGroup,
@@ -16,9 +17,9 @@ export const libraryApi = {
   listWorks: () => invokeTauri<WorkSummary[]>('get_all_works_with_tags'),
   listTags: () => invokeTauri<TagSummary[]>('get_tags'),
   listStudios: () => invokeTauri<string[]>('get_studios'),
-  listFavoriteCharacters: () => invokeTauri<string[]>('get_favorite_characters'),
+  listFavoriteCharacters: () => invokeTauri<string[]>('get_favorite_characters', { scope: accountScope() }),
   setCharacterFavorite: (characterName: string, favorite: boolean) =>
-    invokeTauri<string[]>('set_character_favorite', { characterName, favorite }),
+    trackAccountWrite(invokeTauri<string[]>('set_character_favorite', { scope: accountScope(), characterName, favorite })),
   getWorkDetail: (workId: number) => invokeTauri<WorkDetail>('get_work_detail', { workId }),
   importWork: (dirPath: string) => invokeTauri<number>('import_work_via_json', { dirPath }),
   deleteWork: (workId: number) => invokeTauri<void>('delete_work', { workId }),

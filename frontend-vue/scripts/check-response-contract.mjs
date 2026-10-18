@@ -4,6 +4,11 @@ import { resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const repo = resolve(root, '..');
 const pairs = [
+  ['src/api/contracts/accounts.ts', 'AccountInfo', 'src-tauri/src/accounts/commands.rs', 'AccountInfo'],
+  ['src/api/contracts/accounts.ts', 'AccountState', 'src-tauri/src/accounts/commands.rs', 'AccountState'],
+  ['src/api/contracts/preferences.ts', 'UserPreferences', 'src-tauri/src/settings.rs', 'UserPreferences'],
+  ['src/api/contracts/preferences.ts', 'WorkRecord', 'src-tauri/src/settings.rs', 'WorkRecord'],
+  ['src/api/contracts/preferences.ts', 'ApplicationInfo', 'src-tauri/src/settings.rs', 'ApplicationInfo'],
   ['src/api/contracts/library.ts', 'TagSummary', 'src-tauri/src/library/models.rs', 'Tag'],
   ['src/api/contracts/library.ts', 'WorkSummary', 'src-tauri/src/library/models.rs', 'WorkWithTags'],
   ['src/api/contracts/library.ts', 'WorkDetail', 'src-tauri/src/library/models.rs', 'WorkDetail'],

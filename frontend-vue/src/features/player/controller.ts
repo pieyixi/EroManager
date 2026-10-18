@@ -1,4 +1,6 @@
 import { nextTick } from 'vue';
+import { usePreferencesStore } from '../../stores/preferences';
+import { createPlayerPreferences, shouldAdvanceEpisode } from './preferences';
 import { archiveApi } from '../../api/commands/archive';
 import { playerApi } from '../../api/commands/player';
 import type { ArchiveEpisode } from '../../api/contracts/archive';
@@ -23,6 +25,10 @@ export function installPlayerController(): () => void {
   const library = useLibraryStore();
   const navigation = useNavigationStore();
   const player = usePlayerStore();
+  const preferences = usePreferencesStore();
+  let lastHistorySave = 0;
+  let openingRevision = 0;
+  let endedEpisode = '';
   const layout = createPlayerLayout(player);
   const thumbnails = createPlayerThumbnails(player, formatPlayerTime);
   let pollTimer: number | null = null;
@@ -64,6 +70,7 @@ export function installPlayerController(): () => void {
     if (!player.libmpvReady) return Promise.resolve();
     if (pollStatusPromise) return pollStatusPromise;
     const request = (async () => {
+      const expectedPath = player.episode?.video_path;
       const [current, duration, muted, paused, speed, ended] = await Promise.all([
         safeMpvGetProperty<number>('time-pos', 'double'),
         safeMpvGetProperty<number>('duration', 'double'),
@@ -72,15 +79,19 @@ export function installPlayerController(): () => void {
         safeMpvGetProperty<number>('speed', 'double'),
         safeMpvGetProperty<boolean>('eof-reached', 'flag'),
       ]);
+      if (expectedPath !== player.episode?.video_path) return;
       if (!player.isSeeking && Number.isFinite(Number(current))) player.currentTime = Number(current);
       if (Number.isFinite(Number(duration)) && Number(duration) > 0) player.duration = Number(duration);
       if (!player.editingTime) player.timeInput = formatPlayerTime(player.currentTime);
       if (muted !== null) player.muted = Boolean(muted);
       if (paused !== null) player.paused = Boolean(paused);
       if (Number.isFinite(Number(speed))) player.speed = Number(speed);
-      if (ended && player.loopMode === 'all' && !player.handlingEnd) {
+      if (Date.now() - lastHistorySave >= 5000) { lastHistorySave = Date.now(); playbackPreferences.save(); }
+      if (!ended) endedEpisode = '';
+      if (shouldAdvanceEpisode(Boolean(ended), player.loopMode, preferences.values.player_auto_next) && !player.handlingEnd && endedEpisode !== expectedPath) {
+        endedEpisode = expectedPath || '';
         player.handlingEnd = true;
-        void playNextEpisode(true).finally(() => { player.handlingEnd = false; });
+        void playNextEpisode(false).finally(() => { player.handlingEnd = false; });
       }
     })();
     pollStatusPromise = request;
@@ -150,14 +161,16 @@ export function installPlayerController(): () => void {
 
   async function setLoopMode(mode: string): Promise<void> {
     player.loopMode = (['one', 'all'].includes(mode) ? mode : 'off') as PlayerLoopMode;
+    if (preferences.values.player_loop !== player.loopMode) preferences.update({ player_loop: player.loopMode });
     if (!player.libmpvReady) return;
     try { await mpvSetProperty('loop-file', player.loopMode === 'one' ? 'inf' : 'no'); }
     catch (error) { message('err', `循环设置失败: ${errorText(error)}`); }
   }
 
-  async function setVolume(value: string | number): Promise<void> {
+  async function setVolume(value: string | number, persist = true): Promise<void> {
     if (player.muted) return;
     player.volume = Math.max(0, Math.min(100, Number(value) || 0));
+    if (persist && preferences.values.player_volume !== player.volume) preferences.update({ player_volume: player.volume });
     try { await mpvSetProperty('volume', player.volume); }
     catch (error) { message('err', errorText(error)); }
   }
@@ -173,9 +186,10 @@ export function installPlayerController(): () => void {
       pendingSeek: null,
       seekCommandRunning: false,
       paused: false,
-      speed: 1,
-      fitMode: 'contain',
-      loopMode: 'off',
+      speed: preferences.values.player_speed,
+      volume: preferences.values.player_volume,
+      fitMode: preferences.values.player_fit,
+      loopMode: preferences.values.player_loop,
       handlingEnd: false,
       sidebarCollapsed: false,
       descriptionExpanded: false,
@@ -186,6 +200,8 @@ export function installPlayerController(): () => void {
 
   async function openPlayerWithEpisode(episode: PlayerEpisode, title: string, mode: PlayerMode = 'detail'): Promise<void> {
     if (!episode?.video_path) return;
+    playbackPreferences.save();
+    const revision = ++openingRevision;
     player.episode = episode;
     player.title = title;
     player.hint = '正在启动 mpv 播放窗口...';
@@ -200,6 +216,7 @@ export function installPlayerController(): () => void {
         await initLibMpv();
         player.libmpvReady = true;
       }
+      if (revision !== openingRevision) return;
     } catch (error) {
       player.videoLoading = false;
       player.hint = 'mpv 未启动';
@@ -215,12 +232,16 @@ export function installPlayerController(): () => void {
       const firstFrame = waitForFirstFrame(episode.video_path);
       await mpvCommand('loadfile', [episode.video_path]);
       await applyFitMode();
-      await setLoopMode('off');
+      await setLoopMode(player.loopMode);
       await setVolume(player.volume);
+      await mpvSetProperty('speed', player.speed);
       player.muted = Boolean(await safeMpvGetProperty<boolean>('mute', 'flag'));
       await pollStatus();
       void thumbnails.prefetch(episode.video_path, player.duration);
       if (!await firstFrame) throw new Error('视频首帧加载超时');
+      if (revision !== openingRevision) return;
+      await playbackPreferences.resume(episode);
+      if (revision !== openingRevision) return;
       await commitVideoReveal();
       layout.scheduleSync();
       player.hint = '';
@@ -247,6 +268,8 @@ export function installPlayerController(): () => void {
   }
 
   async function returnFromPlayer(): Promise<void> {
+    playbackPreferences.save();
+    openingRevision += 1;
     stopPolling();
     seekController.stopKeySeek();
     const thumbnailRelease = thumbnails.release();
@@ -291,14 +314,17 @@ export function installPlayerController(): () => void {
     catch (error) { message('err', errorText(error)); }
   }
 
-  async function setSpeed(value: number): Promise<void> {
+  async function setSpeed(value: number, persist = true): Promise<void> {
     player.speed = Math.max(0.25, Math.min(4, Number(value) || 1));
+    if (persist && preferences.values.player_speed !== player.speed) preferences.update({ player_speed: player.speed });
     try { await mpvSetProperty('speed', player.speed); }
     catch (error) { message('err', errorText(error)); }
   }
 
   async function loadEpisode(episode: PlayerEpisode): Promise<void> {
     if (!episode?.video_path || !player.libmpvReady) return;
+    playbackPreferences.save();
+    const revision = ++openingRevision;
     player.episode = episode;
     player.title = `${workTitle()} / 第${playerEpisodeNumber(episode)}集`;
     thumbnails.reset(episode.video_path);
@@ -312,6 +338,9 @@ export function installPlayerController(): () => void {
       await pollStatus();
       void thumbnails.prefetch(episode.video_path, player.duration);
       if (!await firstFrame) throw new Error('视频首帧加载超时');
+      if (revision !== openingRevision) return;
+      await playbackPreferences.resume(episode);
+      if (revision !== openingRevision) return;
       await commitVideoReveal();
       layout.scheduleSync();
     } finally {
@@ -366,6 +395,7 @@ export function installPlayerController(): () => void {
   function cycleFitMode(): void {
     const modes: PlayerFitMode[] = ['contain', 'fill', 'original'];
     player.fitMode = modes[(modes.indexOf(player.fitMode) + 1) % modes.length];
+    preferences.update({ player_fit: player.fitMode });
     void applyFitMode();
   }
 
@@ -386,7 +416,7 @@ export function installPlayerController(): () => void {
     isPlayerActive: () => navigation.activePage === 'page-player',
     thumbnails,
     seekRelative: seek,
-    setSpeed,
+    setSpeed: value => setSpeed(value, false),
     pollStatus,
     mpvCommand: (name, args = []) => mpvCommand(name, args),
     mpvSetProperty: (name, value) => mpvSetProperty(name, value),
@@ -438,6 +468,7 @@ export function installPlayerController(): () => void {
     openPlayer,
     openPlayerWithEpisode,
     returnFromPlayer,
+    saveProgress: () => playbackPreferences.save(),
     togglePlay,
     setSpeed,
     playEpisodeById,
@@ -466,9 +497,18 @@ export function installPlayerController(): () => void {
     hideFullscreenControls: layout.hideFullscreenControls,
   };
 
+  const playbackPreferences = createPlayerPreferences({
+    player, pollStatus, report: text => message('err', text),
+    setVolume: value => setVolume(value, false), setSpeed: value => setSpeed(value, false),
+    setLoop: setLoopMode, applyFit: applyFitMode,
+  });
   registerPlayerCommands(commands);
 
+
   return () => {
+    playbackPreferences.save();
+    openingRevision += 1;
+    playbackPreferences.dispose();
     stopPolling();
     seekController.stopKeySeek();
     thumbnails.dispose();

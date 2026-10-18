@@ -1,6 +1,9 @@
+import { mockAccounts } from './mock/accounts';
 import type { ArchiveDraft } from './contracts/archive';
 import type { TagSummary, WorkDetail, WorkSummary, UnarchivedItem } from './contracts/library';
 import type { EhGallerySummary } from './contracts/eh';
+import { createDownloadScene } from './mock/downloadScene';
+import type { UserPreferences, WorkRecord } from './contracts/preferences';
 
 type InvokeArgs = Record<string, unknown>;
 type MockHandler = (args: InvokeArgs) => unknown | Promise<unknown>;
@@ -117,7 +120,8 @@ ehGalleries[0] = {
   folder_path: 'D:\\MockEhLibrary\\440955-Gallery',
 };
 
-let favoriteCharacters = ['角色2', '角色5'];
+ehGalleries.push(...createDownloadScene().galleries);
+let favoriteGalleryGids: number[] = [];
 
 function allTags(): TagSummary[] {
   const tags = works.flatMap((work) => work.tags || []);
@@ -176,6 +180,19 @@ const ehCategoryMetrics = [
 ];
 
 const handlers: Record<string, MockHandler> = {
+  account_state: () => mockAccounts.state(),
+  account_auth: ({ id, pin }) => mockAccounts.auth(String(id), String(pin)),
+  account_lock: () => mockAccounts.lock(),
+  account_logout: () => mockAccounts.logout(),
+  account_update_profile: ({ scope, nickname, avatar }) => mockAccounts.profile(scope, String(nickname), String(avatar)),
+  account_change_pin: ({ scope, newPin }) => mockAccounts.pin(scope, String(newPin)),
+  account_get_data: ({ scope, kind, item }) => mockAccounts.get(scope, String(kind), String(item)),
+  account_set_data: ({ scope, kind, item, value }) => mockAccounts.set(scope, String(kind), String(item), String(value)),
+  get_user_preferences: ({ scope }) => mockAccounts.preferences(scope),
+  set_user_preferences: ({ scope, preferences }) => mockAccounts.savePreferences(scope, preferences as UserPreferences),
+  get_work_record: ({ scope, kind, contentId }) => mockAccounts.getRecord(scope, String(kind), Number(contentId)),
+  set_work_record: ({ scope, record }) => mockAccounts.setRecord(scope, record as WorkRecord),
+  get_application_info: () => ({ version: '5.2.0', app_directory: '浏览器预览', database_directory: '浏览器独立数据' }),
   initialize_media_library: () => ({ root_path: 'D:\\MockLibrary', source: 'previous', rebound_paths: 0, needs_binding: false }),
   bind_media_library: ({ rootPath }) => ({ root_path: String(rootPath || 'D:\\MockLibrary'), source: 'manual', rebound_paths: 0, needs_binding: false }),
   apply_library_updates: () => 0,
@@ -186,11 +203,10 @@ const handlers: Record<string, MockHandler> = {
   get_all_works_with_tags: () => structuredClone(works),
   get_tags: () => allTags(),
   get_studios: () => [...studios],
-  get_favorite_characters: () => [...favoriteCharacters],
-  set_character_favorite: ({ characterName, favorite }) => {
-    const name = String(characterName || '');
-    favoriteCharacters = Boolean(favorite) ? [...new Set([...favoriteCharacters, name])] : favoriteCharacters.filter((item) => item !== name);
-    return [...favoriteCharacters];
+  get_favorite_characters: ({ scope }) => mockAccounts.favorites(scope, 'favorite-media'),
+  set_character_favorite: ({ scope, characterName, favorite }) => {
+    mockAccounts.favorite(scope, 'favorite-media', String(characterName).trim(), Boolean(favorite));
+    return mockAccounts.favorites(scope, 'favorite-media');
   },
   get_work_detail: ({ workId }) => detail(Number(workId)),
   import_work_via_json: () => 1,
@@ -209,14 +225,17 @@ const handlers: Record<string, MockHandler> = {
   load_cover_cache: ({ coverPaths }) => (coverPaths as string[] || []).map((path, index) => [path, path.startsWith('/@fs/') ? path : coverData(path, index, path.includes('episode') || (path.includes('eh-page') && /\/(8|19)$/.test(path)))]),
   eh_delete_gallery_record: ({ gid }) => {
     ehGalleries = ehGalleries.filter((gallery) => gallery.gid !== Number(gid));
+    favoriteGalleryGids = favoriteGalleryGids.filter(value => value !== Number(gid));
     return null;
   },
   eh_delete_gallery_folder: ({ gid }) => {
     ehGalleries = ehGalleries.filter((gallery) => gallery.gid !== Number(gid));
+    favoriteGalleryGids = favoriteGalleryGids.filter(value => value !== Number(gid));
     return null;
   },
   hitomi_delete_gallery_folder: ({ id }) => {
     ehGalleries = ehGalleries.filter((gallery) => gallery.gid !== -Number(id));
+    favoriteGalleryGids = favoriteGalleryGids.filter(value => value !== -Number(id));
     return null;
   },
   list_unarchived_folders: () => structuredClone(unarchived),
@@ -237,6 +256,12 @@ const handlers: Record<string, MockHandler> = {
     categories: structuredClone(ehCategoryMetrics),
   }),
   eh_list_local_galleries: () => structuredClone(ehGalleries),
+  eh_get_favorite_galleries: ({ scope }) => mockAccounts.favorites(scope, 'favorite-book').map(Number).filter(gid => ehGalleries.some(gallery => gallery.gid === gid)),
+  eh_set_gallery_favorite: ({ scope, gid, favorite }) => {
+    const id = Number(gid);
+    if (favorite && !ehGalleries.some(gallery => gallery.gid === id)) throw new Error('作品不存在，无法收藏');
+    mockAccounts.favorite(scope, 'favorite-book', String(id), Boolean(favorite)); return Boolean(favorite);
+  },
   eh_get_settings: () => structuredClone(ehSettings),
   eh_save_settings: ({ input }) => {
     const value = input as Record<string, string>;
@@ -286,6 +311,7 @@ const handlers: Record<string, MockHandler> = {
   eh_bind_local_library: ({ rootPath }) => ({ ...ehSettings, root_path: String(rootPath) }),
   eh_scan_local_library: () => ({ folders: 10, indexed: 10, created_meta: 9, created_cover: 9, removed_records: 0, skipped: 0, errors: [] }),
   open_folder: () => undefined,
+  apply_close_action: () => undefined,
   delete_work: ({ workId }) => {
     const index = works.findIndex((work) => work.id === Number(workId));
     if (index >= 0) works.splice(index, 1);
@@ -293,6 +319,10 @@ const handlers: Record<string, MockHandler> = {
 };
 
 export async function invokeBrowserMock<T>(command: string, args: InvokeArgs = {}): Promise<T> {
+  if (command === 'eh_get_library_dashboard') {
+    const delay = Number(new URLSearchParams(location.search).get('statsDelay') || 0);
+    if (Number.isFinite(delay) && delay > 0) await new Promise(resolve => setTimeout(resolve, Math.min(delay, 30_000)));
+  }
   const handler = handlers[command];
   if (!handler) throw new Error(`Web Mock 尚未实现命令: ${command}`);
   return await handler(args) as T;

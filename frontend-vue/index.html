@@ -3,7 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>本地里番管理器</title>
+    <title>裏界箱庭</title>
+    <script>
+      try {
+        const theme = localStorage.getItem('media-library-theme-mode') === 'system'
+          ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : (localStorage.getItem('media-library-theme') === 'dark' ? 'dark' : 'light');
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      } catch { /* 存储不可用时沿用浅色。 */ }
+    </script>
+    <style>html,body{margin:0;background:#fafafa}html[data-theme="dark"],html[data-theme="dark"] body{background:#1e2025}</style>
   </head>
   <body>
     <div id="app"></div>

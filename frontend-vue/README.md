@@ -1,57 +1,40 @@
 # Vue Frontend
 
-This directory is the active Tauri frontend. It uses Vue 3, TypeScript, and Vite.
+This is the active Tauri frontend: Vue 3, TypeScript, Pinia and Vite. The archived frontend is not part of the build.
 
-Version 5.0 keeps Vue as the sole frontend runtime and adds queued downloads, source-specific history, and incremental retries behind the same typed Tauri command boundary. The previous HTML and JavaScript frontend is no longer part of the active build.
-
-## Compatibility contract
-
-- The existing DOM ids, class names, visible text, and shared CSS remain unchanged.
-- Rust commands are registered from explicit domain modules; the frontend and backend are checked against the same command contract.
-- Each existing page is now a Vue single-file component.
-- Pinia stores own application state; feature modules own library and player behavior.
-- `npm run check:parity` prevents accidental removal of the stable DOM contract and rejects inline HTML handlers.
-
-## Commands
+## Development
 
 ```powershell
 npm install
-npm run test
-npm run build
 npm run dev
+npm run build
 ```
 
-Tauri runs these commands automatically through `src-tauri/tauri.conf.json`.
-
-## Browser development
-
-`npm run dev` can run directly in a normal browser without Cargo or a Tauri window. In Vite development mode, `src/api/tauri.ts` selects `src/api/webMock.ts` only when the Tauri runtime is absent. The mock provides representative library, detail, incomplete-entry, filter, pagination, and settings data for rapid UI work.
-
-The adapter follows these boundaries:
-
-- A real Tauri runtime always has priority and continues to call the Rust commands.
-- Production builds never enable the browser mock.
-- The mock implements backend response contracts, not duplicated business logic.
-- Native window controls, libmpv playback, filesystem writes, and backup/restore still require Tauri integration testing.
-- Unsupported native commands fail explicitly instead of pretending that an operation succeeded.
-
-Use the browser for layout, responsive behavior, themes, animation, filtering, navigation, and data states. Use Tauri only for the final native integration pass.
+Tauri uses this directory through `src-tauri/tauri.conf.json`. A browser preview uses the typed development mock only when no Tauri runtime is present. Production always uses native commands and never loads mock library data.
 
 ## Structure
 
-- `src/components`: Vue page components.
-- `src/api/contracts`: shared TypeScript DTOs for Rust and browser mock responses.
-- `src/api/commands`: typed command adapters; components and stores do not call `invoke` directly.
-- `src/stores`: Pinia state and domain workflows (`library`, `libraryConsole`, `archive`, `ehSettings`, `ehDownload`, `ehLibrary`, `ehReader`, `player`).
-- `src/features/player`: typed libmpv transport, native layout, thumbnail pipeline, and playback controller.
-- `src/features/theme`: the only owner of document-level theme transitions.
-- `src/runtime`: startup wiring and application-level events.
-- `scripts/ui-contract.json`: stable DOM ids used by CSS and native integration.
-- `scripts/check-command-contract.mjs`: verifies typed API, Rust registration, and browser mock parity.
-- `ARCHITECTURE.md`: final ownership rules, dependency direction, migration gates, and completion criteria.
+- `src/pages`: route-level pages, composed only by `App.vue`.
+- `src/components/shell`: shared application chrome, sidebar, browse toolbar and overlays.
+- `src/components/shared`: domain-independent window and back controls.
+- `src/components/home` / `downloads`: business components owned by their domains.
+- `src/features/shell`: UI search/filter and ordinary-window controllers.
+- `src/features/home`, `reader`, `player`, `theme`: cohesive feature behavior and UI state machines.
+- `src/stores`: Pinia shared state and business workflows; established store paths are retained.
+- `src/api/contracts` / `commands`: typed backend contract and adapters.
+- `src/runtime`: application lifetime and global event wiring.
+- `src/assets/styles`: ordered shared styles plus domain styles; reader styling remains scoped.
 
-## Validation
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for ownership, dependency direction and verification rules.
 
-`npm run build` is the required frontend gate. It runs Vitest, enforces the current architecture ceiling, validates the UI contract, performs strict TypeScript checking, and builds the production bundle. Run `npm run audit:architecture` to inspect progress toward zero global bridges, DOM queries, and generated HTML writes. Native playback should additionally be checked in a Tauri window because the libmpv surface cannot be validated in a normal browser.
+Browser development includes a default download showcase: eight cards per source covering queued, active, failed-page, failed-request and completed states. These snapshots are installed only by the development browser runtime, do not start a worker or write history, and the sample queue is removed before a manual download starts. Production bundles exclude the fixture modules.
 
-Keep visual changes separate from behavior changes so native playback regressions remain easy to isolate.
+Downloads run independent Eh and Hitomi FIFO workers, one active work per source. Both sources can run together without changing the existing per-work three-image parallelism, newest-first card order or credential-free history format.
+
+## Compatibility and Validation
+
+Structural cleanup preserves DOM identifiers, classes, text, CSS cascade, routes, source IDs, native command contracts and data formats. Gesture/animation state machines stay cohesive. Do not create generic layers or compatibility forwarding files merely to preserve old source paths.
+
+`npm run build` runs the complete frontend gate: unit tests, architecture ownership/cycle checks, command and response parity, recursive template parity, strict Vue TypeScript and production bundling. Individual checks are also available through `npm run test`, `check:architecture`, `check:commands`, `check:responses` and `check:parity`.
+
+For before/after layout checks use `scripts/verify-frontend-structure.cjs` as described in the architecture document. Native controls, filesystem operations and libmpv playback additionally require isolated Tauri verification. A successful build is not a production release.

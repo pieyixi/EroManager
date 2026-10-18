@@ -17,18 +17,25 @@ fn validate_delete_target(root: &Path, folder: &Path) -> Result<PathBuf, String>
 }
 
 #[tauri::command]
-pub fn eh_delete_gallery_record(gid: i64) -> Result<(), String> {
+pub fn eh_delete_gallery_record(
+    gid: i64,
+    db: tauri::State<crate::library::database::Database>,
+) -> Result<(), String> {
     let connection = open_eh_db()?;
     // Deletion is intentionally idempotent: browser history is auxiliary and
     // may outlive a database row removed by a scan or another UI surface.
     connection
         .execute("DELETE FROM EhGalleries WHERE Gid=?1", [gid])
         .map_err(|error| error.to_string())?;
+    crate::accounts::forget_gallery(&*db.conn.lock().map_err(|e| e.to_string())?, gid)?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn eh_delete_gallery_folder(gid: i64) -> Result<(), String> {
+pub fn eh_delete_gallery_folder(
+    gid: i64,
+    db: tauri::State<crate::library::database::Database>,
+) -> Result<(), String> {
     let connection = open_eh_db()?;
     let settings = read_eh_settings(&connection)?;
     let root = validate_root(&settings.root_path)?;
@@ -37,6 +44,7 @@ pub fn eh_delete_gallery_folder(gid: i64) -> Result<(), String> {
     connection
         .execute("DELETE FROM EhGalleries WHERE Gid=?1", [gid])
         .map_err(|error| format!("目录已删除，但移除数据库记录失败：{error}"))?;
+    crate::accounts::forget_gallery(&*db.conn.lock().map_err(|e| e.to_string())?, gid)?;
     Ok(())
 }
 
@@ -46,7 +54,7 @@ mod tests {
 
     fn temp_root(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
-            "hanime-manager-delete-{label}-{}-{}",
+            "ero-manager-delete-{label}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

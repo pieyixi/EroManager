@@ -3,6 +3,8 @@ import { ehApi } from "../api/commands/eh";
 import { mediaApi } from "../api/commands/media";
 import type { EhGallerySummary, EhReaderPage } from "../api/contracts/eh";
 import { useNavigationStore } from "./navigation";
+import { usePreferencesStore } from './preferences';
+import { preferencesApi } from '../api/commands/preferences';
 export type { EhGallerySummary, EhReaderPage } from "../api/contracts/eh";
 export interface EhSpread {
   pages: EhReaderPage[];
@@ -52,6 +54,10 @@ export const useEhReaderStore = defineStore("ehReader", {
     loading: false,
     error: "",
     loadGeneration: 0,
+    presentedPage: 0,
+    lastRecordedPosition: 0,
+    recordError: '',
+    recordLoaded: false,
   }),
   getters: {
     spreads(state): EhSpread[] {
@@ -78,6 +84,16 @@ export const useEhReaderStore = defineStore("ehReader", {
   },
   actions: {
     async open(gallery: EhGallerySummary): Promise<void> {
+      this.saveWorkRecord();
+      const preferences = usePreferencesStore();
+      this.pageMode = preferences.values.reader_mode;
+      this.direction = preferences.values.reader_direction;
+      this.zoom = preferences.values.reader_zoom;
+      this.pairOffset = 1;
+      this.presentedPage = 0;
+      this.lastRecordedPosition = 0;
+      this.recordError = '';
+      this.recordLoaded = false;
       this.gallery = gallery;
       this.loading = true;
       this.error = "";
@@ -87,9 +103,26 @@ export const useEhReaderStore = defineStore("ehReader", {
       const generation = ++this.loadGeneration;
       useNavigationStore().showPage("page-eh-reader");
       try {
-        const pages = await ehApi.getPages(gallery.gid);
+        const [pages, record] = await Promise.all([
+          ehApi.getPages(gallery.gid),
+          preferences.loaded ? preferencesApi.getRecord('book', gallery.gid).catch(error => {
+            if (generation === this.loadGeneration) this.recordError = `阅读记录读取失败：${String(error)}`;
+            return null;
+          }) : Promise.resolve(null),
+        ]);
         if (generation !== this.loadGeneration) return;
         this.pages = pages;
+        this.recordLoaded = preferences.loaded && !this.recordError;
+        if (record) {
+          this.pairOffset = record.pair_offset;
+          this.mergedPairs = Object.fromEntries(record.merged_pairs.map(key => [key, true]));
+          this.lastRecordedPosition = record.position;
+          if (preferences.values.remember_reading) {
+            const page = Math.min(Math.max(0, Math.floor(record.position)), Math.max(0, pages.length - 1));
+            this.spreadIndex = Math.max(0, this.spreads.findIndex(spread => spread.pages.some(item => item.index === page)));
+            this.presentedPage = page;
+          }
+        }
         this.imageCache = {};
         await this.loadSpreadImages(this.spreadIndex, generation);
         void this.prefetchNearby(this.spreadIndex, generation);
@@ -101,6 +134,7 @@ export const useEhReaderStore = defineStore("ehReader", {
       }
     },
     close(): void {
+      this.saveWorkRecord();
       this.loadGeneration += 1;
       this.toolsVisible = false;
       this.settingsVisible = false;
@@ -148,12 +182,14 @@ export const useEhReaderStore = defineStore("ehReader", {
     setPageMode(mode: EhPageMode): void {
       const page = this.currentSpread?.startIndex || 0;
       this.pageMode = mode;
+      usePreferencesStore().update({ reader_mode: mode });
       this.goToPage(page);
     },
     togglePairing(): void {
       const page = this.currentSpread?.startIndex || 0;
       this.pairOffset = this.pairOffset === 0 ? 1 : 0;
       this.goToPage(page);
+      this.saveWorkRecord();
     },
     toggleCurrentPairMerge(): void {
       const key = this.currentPairKey;
@@ -162,6 +198,21 @@ export const useEhReaderStore = defineStore("ehReader", {
         ...this.mergedPairs,
         [key]: !this.mergedPairs[key],
       };
+      this.saveWorkRecord();
+    },
+    markPresented(page: number): void {
+      this.presentedPage = page;
+      this.saveWorkRecord();
+    },
+    saveWorkRecord(): void {
+      const preferences = usePreferencesStore();
+      if (!preferences.loaded || !this.recordLoaded || !this.gallery || this.loading || !this.pages.length) return;
+      const id = this.gallery.gid;
+      if (preferences.values.remember_reading) this.lastRecordedPosition = this.presentedPage;
+      void preferencesApi.setRecord({ kind: 'book', content_id: id, position: this.lastRecordedPosition,
+        pair_offset: this.pairOffset, merged_pairs: Object.keys(this.mergedPairs).filter(key => this.mergedPairs[key]) })
+        .then(() => { if (this.gallery?.gid === id) this.recordError = ''; })
+        .catch(error => { if (this.gallery?.gid === id) this.recordError = `阅读记录尚未保存：${String(error)}`; });
     },
     imageUrl(path: string): string {
       return this.imageCache[path] || "";

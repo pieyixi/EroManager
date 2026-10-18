@@ -1,3 +1,4 @@
+import { accountScope, trackAccountWrite } from '../accountContext';
 import { invokeTauri } from '../tauri';
 import type {
   EhDownloadInput,
@@ -13,6 +14,8 @@ import { listenTauri } from '../tauri';
 export const ehApi = {
   getOverview: () => invokeTauri<EhLibraryOverview>('eh_get_library_overview'),
   listGalleries: () => invokeTauri<EhGallerySummary[]>('eh_list_local_galleries'),
+  getFavorites: () => invokeTauri<number[]>('eh_get_favorite_galleries', { scope: accountScope() }),
+  setFavorite: (gid: number, favorite: boolean) => trackAccountWrite(invokeTauri<boolean>('eh_set_gallery_favorite', { scope: accountScope(), gid, favorite })),
   getPages: (gid: number) => invokeTauri<EhReaderPage[]>('eh_get_gallery_pages', { gid }),
   deleteRecord: (gid: number) => invokeTauri<void>('eh_delete_gallery_record', { gid }),
   deleteFolder: (gid: number) => invokeTauri<void>('eh_delete_gallery_folder', { gid }),

@@ -396,7 +396,7 @@ mod atomic_write_tests {
     #[test]
     fn atomically_replaces_an_existing_file_without_partial_artifacts() {
         let root = std::env::temp_dir().join(format!(
-            "hanime-manager-atomic-write-{}-{}",
+            "ero-manager-atomic-write-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

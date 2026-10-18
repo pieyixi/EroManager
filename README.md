@@ -1,6 +1,6 @@
-# Local Library Desktop
+# ero-manager
 
-A portable, local-first desktop application for organizing and reviewing a privately maintained media collection.
+A portable, local-first desktop application for organizing and reviewing a privately maintained media collection. Its display name is 裏界箱庭.
 
 Local browsing, playback, and reading work offline. Optional source downloads require an internet connection. The application keeps its index beside the executable and does not require a hosted account service.
 
@@ -22,6 +22,18 @@ Local browsing, playback, and reading work offline. Optional source downloads re
 - SQLite
 - Vue 3, TypeScript, Pinia, and Vite
 - libmpv
+
+## Version 5.2
+
+Version 5.2 improves startup presentation, catalog statistics, profiles, and navigation while preserving portable local storage.
+
+- Prepared first-page covers and initial home draws before revealing the main interface.
+- Cached catalog-size statistics with coordinated loading placeholders.
+- Local profiles, per-account preferences and favorites, optional four-digit PIN locks, and configurable lock boundaries.
+- A separate keyboard-driven account-management terminal that can run alongside the application.
+- Inline profile editing, circular avatar cropping, and expanded avatar previews.
+- Shared cover transitions between catalogs, downloads, and details, with preserved return positions.
+- Persistent draw-cycle history and consistent theme transitions.
 
 ## Version 5.1
 
@@ -91,9 +103,16 @@ Build the Windows release:
 ```powershell
 npm --prefix frontend-vue run build
 cargo build --release --manifest-path src-tauri\Cargo.toml
+python frontend-vue\scripts\remove-admin-icon.py src-tauri\target\release\ero-manager-admin.exe
 ```
 
-The portable package contains only `hanime-manager.exe`, `hanime_manager_lib.dll`, `lib/libmpv-2.dll`, and `lib/libmpv-wrapper.dll`. Build output is not an installed update; back up the previous runtime and replace only these program files. Never overwrite an existing database or user-data folder.
+The portable package contains only `ero-manager.exe`, `ero-manager-admin.exe`, `lib/ero_manager_lib.dll`, `lib/libmpv-2.dll`, and `lib/libmpv-wrapper.dll`. Build output is not an installed update; back up the previous runtime and replace only these program files. Never overwrite an existing database or user-data folder. Both SQLite databases live under `db/` beside the executable.
+
+Run `ero-manager-admin.exe` to manage local accounts. The first use asks you to set an administrator PIN; there is no default password. The terminal uses the Windows default executable icon and supports running alongside the main application.
+
+Existing installations retain their application storage identifier, database names, library markers and backup-format identifiers for compatibility. Product renaming does not move or reset user data.
+
+For the first renamed update, back up existing `hanime-manager.exe` and `hanime_manager_lib.dll` runtime files as well. Verify the new executable before retiring the legacy runtime. Optional native test overrides use `ERO_MPV_LIBRARY` and `ERO_TEST_VIDEO`; the former `HANIME_*` names remain accepted for compatibility.
 
 ## Data Policy
 

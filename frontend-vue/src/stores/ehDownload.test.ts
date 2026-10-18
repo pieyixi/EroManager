@@ -18,14 +18,16 @@ const mocks = vi.hoisted(() => ({
 }));
 const library = { galleries: [] as EhGallerySummary[], load: mocks.libraryLoad, showDetail: mocks.showDetail,
   error: '', currentSort: '', currentPage: 1 };
+const navigation = { askConfirm: mocks.askConfirm, pageRevision: 0 };
 vi.mock('../api/commands/eh', () => ({ ehApi: mocks }));
 vi.mock('../api/commands/settings', () => ({ settingsApi: mocks }));
 vi.mock('../api/commands/system', () => ({ systemApi: { openFolder: vi.fn() } }));
 vi.mock('../api/tauri', () => ({ pickDirectory: vi.fn() }));
 vi.mock('./ehLibrary', () => ({ useEhLibraryStore: () => library }));
-vi.mock('./navigation', () => ({ useNavigationStore: () => ({ askConfirm: mocks.askConfirm }) }));
+vi.mock('./navigation', () => ({ useNavigationStore: () => navigation }));
 
 import { isDownloadComplete, useEhDownloadStore } from './ehDownload';
+import { usePreferencesStore } from './preferences';
 
 const ehResult = (id: number, downloaded = 3, failures: EhDownloadResult['failures'] = []): EhDownloadResult => ({
   gid: id, title: `Eh ${id}`, folder_path: `D:\\Eh\\${id}`, total_pages: 3,
@@ -62,6 +64,7 @@ describe('Eh and Hitomi download queue', () => {
     mocks.libraryLoad.mockResolvedValue(undefined);
     library.galleries = [];
     library.error = '';
+    navigation.pageRevision = 0;
   });
 
   it('validates each lane independently and clears only that lane input', () => {
@@ -86,9 +89,9 @@ describe('Eh and Hitomi download queue', () => {
     const hitomi = { gid: -123, title: 'Hitomi' } as EhGallerySummary;
     library.galleries = [eh, hitomi];
     await store.openCompletedGallery(123);
-    expect(mocks.showDetail).toHaveBeenLastCalledWith(eh);
+    expect(mocks.showDetail).toHaveBeenLastCalledWith(eh, 'page-eh-download');
     await store.openCompletedGallery(-123);
-    expect(mocks.showDetail).toHaveBeenLastCalledWith(hitomi);
+    expect(mocks.showDetail).toHaveBeenLastCalledWith(hitomi, 'page-eh-download');
     expect(mocks.libraryLoad).not.toHaveBeenCalled();
     expect(mocks.downloadGallery).not.toHaveBeenCalled();
     expect(mocks.downloadHitomi).not.toHaveBeenCalled();
@@ -101,13 +104,26 @@ describe('Eh and Hitomi download queue', () => {
     mocks.libraryLoad.mockImplementationOnce(async () => { library.galleries = [gallery]; });
     await store.openCompletedGallery(-124);
     expect(mocks.libraryLoad).toHaveBeenCalledTimes(1);
-    expect(mocks.showDetail).toHaveBeenCalledWith(gallery);
+    expect(mocks.showDetail).toHaveBeenCalledWith(gallery, 'page-eh-download');
     await store.openCompletedGallery(125);
     expect(mocks.showDetail).toHaveBeenCalledTimes(1);
     expect(store.messages.eh?.text).toContain('找不到');
     library.error = '读取作品库失败';
     await store.openCompletedGallery(125);
     expect(store.messages.eh?.text).toBe('读取作品库失败');
+  });
+
+  it('does not reopen details if the user leaves downloads during a library refresh', async () => {
+    const store = useEhDownloadStore();
+    store.history = [historyItem(125)];
+    let finish!: () => void;
+    mocks.libraryLoad.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    const opening = store.openCompletedGallery(125);
+    navigation.pageRevision++;
+    library.galleries = [{ gid: 125 } as EhGallerySummary];
+    finish();
+    await opening;
+    expect(mocks.showDetail).not.toHaveBeenCalled();
   });
 
   it('never opens failed, incomplete, unknown, queued or downloading works', async () => {
@@ -129,7 +145,7 @@ describe('Eh and Hitomi download queue', () => {
     expect(mocks.libraryLoad).not.toHaveBeenCalled();
   });
 
-  it('accepts another work while one runs, then processes both sources in FIFO order', async () => {
+  it('starts Hitomi while Eh is still running and keeps source histories separate', async () => {
     let resolveEh!: (result: EhDownloadResult) => void;
     mocks.downloadGallery.mockImplementationOnce(() => new Promise((resolve) => { resolveEh = resolve; }));
     mocks.downloadHitomi.mockResolvedValueOnce(hitomiResult(202));
@@ -139,22 +155,111 @@ describe('Eh and Hitomi download queue', () => {
     await vi.waitFor(() => expect(mocks.downloadGallery).toHaveBeenCalledTimes(1));
     store.hitomiIdInput = '202';
     store.enqueueHitomi();
-    expect(store.queue.map((job) => [job.source, job.status])).toEqual([['eh', 'downloading'], ['hitomi', 'queued']]);
-    expect(mocks.downloadHitomi).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(mocks.downloadHitomi).toHaveBeenCalledOnce());
+    expect(store.workersRunning.eh).toBe(true);
+    await vi.waitFor(() => expect(store.hitomiHistory).toHaveLength(1));
+    expect(store.ehHistory).toHaveLength(0);
     expect(JSON.stringify(store.queue)).not.toContain('secret-101');
     expect(store.ehTokenInput).toBe('');
     resolveEh(ehResult(101));
     await idle(store);
-    expect(mocks.downloadGallery).toHaveBeenCalledWith({ gid: 101, token: 'secret-101', pageIndices: undefined });
-    expect(mocks.downloadHitomi).toHaveBeenCalledWith({ id: 202, pageIndices: undefined });
+    expect(mocks.downloadGallery).toHaveBeenCalledWith({ gid: 101, token: 'secret-101', pageIndices: undefined, parallelImages: 3 });
+    expect(mocks.downloadHitomi).toHaveBeenCalledWith({ id: 202, pageIndices: undefined, parallelImages: 3 });
     expect(store.ehHistory[0]).toMatchObject({ gid: 101, coverPath: 'D:\\Eh\\101\\data\\cover.jpg' });
     expect(store.hitomiHistory[0]).toMatchObject({ gid: -202, downloadedPages: 3 });
+  });
+
+  it('snapshots each source concurrency at work start, including the next queued work', async () => {
+    const preferences = usePreferencesStore();
+    preferences.values.eh_parallel_images = 1;
+    preferences.values.hitomi_parallel_images = 5;
+    let finish!: (result: EhDownloadResult) => void;
+    mocks.downloadGallery.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce(ehResult(102));
+    mocks.downloadHitomi.mockResolvedValueOnce(hitomiResult(101));
+    const store = useEhDownloadStore();
+    store.ehGidInput = '101'; store.ehTokenInput = 'one'; store.enqueueEh();
+    await vi.waitFor(() => expect(mocks.downloadGallery).toHaveBeenCalledOnce());
+    store.ehGidInput = '102'; store.ehTokenInput = 'two'; store.enqueueEh();
+    preferences.values.eh_parallel_images = 2;
+    store.hitomiIdInput = '101'; store.enqueueHitomi();
+    await vi.waitFor(() => expect(mocks.downloadHitomi).toHaveBeenCalledOnce());
+    expect(mocks.downloadGallery.mock.calls[0][0].parallelImages).toBe(1);
+    expect(mocks.downloadHitomi.mock.calls[0][0].parallelImages).toBe(5);
+    finish(ehResult(101)); await idle(store);
+    expect(mocks.downloadGallery.mock.calls[1][0].parallelImages).toBe(2);
+  });
+
+  it('keeps FIFO within each source without duplicate workers and isolates same-ID progress', async () => {
+    const ehResolvers: Array<(result: EhDownloadResult) => void> = [];
+    const hitomiResolvers: Array<(result: EhDownloadResult) => void> = [];
+    mocks.downloadGallery.mockImplementation(() => new Promise(resolve => ehResolvers.push(resolve)));
+    mocks.downloadHitomi.mockImplementation(() => new Promise(resolve => hitomiResolvers.push(resolve)));
+    const stopEh = vi.fn(), stopHitomi = vi.fn();
+    mocks.listenDownloadProgress.mockResolvedValue(stopEh);
+    mocks.listenHitomiProgress.mockResolvedValue(stopHitomi);
+    const store = useEhDownloadStore();
+    store.enqueue('eh', 101, 'secret-a'); store.enqueue('hitomi', 101);
+    store.enqueue('eh', 102, 'secret-b'); store.enqueue('hitomi', 102);
+    await vi.waitFor(() => { expect(ehResolvers).toHaveLength(1); expect(hitomiResolvers).toHaveLength(1); });
+    await store.processQueue(); // 已在运行的两路不可重复启动。
+    expect(store.queue.map(job => job.status)).toEqual(['downloading', 'downloading', 'queued', 'queued']);
+    const event = { gid: 101, page: 1, total_pages: 3, percent: 33, text: 'Eh progress' };
+    mocks.listenDownloadProgress.mock.calls[0][0](event);
+    expect(store.ehQueue[0].progressPercent).toBe(33);
+    expect(store.hitomiQueue[0].progressPercent).toBe(0);
+    mocks.listenHitomiProgress.mock.calls[0][0]({ ...event, gid: -101, percent: 67 });
+    expect(store.hitomiQueue[0].progressPercent).toBe(67);
+    ehResolvers[0](ehResult(101));
+    await vi.waitFor(() => expect(ehResolvers).toHaveLength(2));
+    expect(hitomiResolvers).toHaveLength(1); // Hitomi 的下一部仍须等待本路第一部。
+    expect(mocks.downloadGallery.mock.calls.map(call => call[0].gid)).toEqual([101, 102]);
+    ehResolvers[1](ehResult(102));
+    await vi.waitFor(() => expect(store.workersRunning.eh).toBe(false));
+    expect(store.downloading).toBe(true); // 另一边还在下载，壳层指示不能熄灭。
+    hitomiResolvers[0](hitomiResult(101));
+    await vi.waitFor(() => expect(hitomiResolvers).toHaveLength(2));
+    hitomiResolvers[1](hitomiResult(102)); await idle(store);
+    expect(mocks.downloadHitomi.mock.calls.map(call => call[0].id)).toEqual([101, 102]);
+    expect(store.history).toHaveLength(4);
+    expect(stopEh).toHaveBeenCalledTimes(2); expect(stopHitomi).toHaveBeenCalledTimes(2);
+    expect(store.cards.filter(card => card.source === 'eh').map(card => card.gid)).toEqual([102, 101]);
+    expect(store.cards.filter(card => card.source === 'hitomi').map(card => card.gid)).toEqual([-102, -101]);
+    expect(JSON.stringify(store.history)).not.toContain('secret-');
+  });
+
+  it('continues both queues after one source fails and retries without blocking the other', async () => {
+    let finishHitomi!: (result: EhDownloadResult) => void;
+    mocks.downloadGallery.mockRejectedValueOnce(new Error('Eh offline')).mockResolvedValue(ehResult(101));
+    mocks.downloadHitomi.mockImplementation(() => new Promise(resolve => { finishHitomi = resolve; }));
+    const store = useEhDownloadStore();
+    store.enqueue('eh', 101, 'secret-a'); store.enqueue('hitomi', 101);
+    await vi.waitFor(() => { expect(store.ehHistory[0]?.error).toBe('Eh offline'); expect(mocks.downloadHitomi).toHaveBeenCalledOnce(); });
+    expect(store.workersRunning.hitomi).toBe(true);
+    store.ehGidInput = '101'; store.ehTokenInput = 'secret-a';
+    store.retryHistoryPages(store.ehHistory[0]);
+    await vi.waitFor(() => expect(isDownloadComplete(store.ehHistory[0])).toBe(true));
+    expect(store.workersRunning.hitomi).toBe(true);
+    finishHitomi(hitomiResult(101)); await idle(store);
+    expect(store.hitomiHistory[0].gid).toBe(-101);
+  });
+
+  it('serializes overlapping shared-library refreshes and schedules a final up-to-date reload', async () => {
+    let finishFirst!: () => void;
+    mocks.libraryLoad.mockImplementationOnce(() => new Promise<void>(resolve => { finishFirst = resolve; }));
+    const store = useEhDownloadStore();
+    const first = store.refreshLibrary();
+    await store.refreshLibrary(); await store.refreshLibrary();
+    expect(mocks.libraryLoad).toHaveBeenCalledOnce();
+    finishFirst(); await first;
+    expect(mocks.libraryLoad).toHaveBeenCalledTimes(2);
+    expect(store.libraryRefreshing).toBe(false);
   });
 
   it('stacks newest work before all cards and keeps its slot through completion and clock rollback', () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-12T00:00:00.000Z'));
     const store = useEhDownloadStore();
-    store.workerRunning = true;
+    store.workersRunning = { eh: true, hitomi: true };
     store.history = [historyItem(-900)];
     for (const id of [101, 102, 103]) store.enqueue('hitomi', id);
     const order = [-103, -102, -101, -900];
@@ -176,7 +281,7 @@ describe('Eh and Hitomi download queue', () => {
 
   it('keeps one card and its original slot through failure, retry and successful completion', () => {
     const store = useEhDownloadStore();
-    store.workerRunning = true;
+    store.workersRunning = { eh: true, hitomi: true };
     store.history = [historyItem(-300), historyItem(-200, [{ page: 3, reason: '超时' }]), historyItem(-100)]
       .map((item) => ({ ...item, queuedAt: `2026-10-11T0${Math.abs(item.gid) / 100}:00:00.000Z` }));
     const order = [-300, -200, -100];
@@ -207,7 +312,7 @@ describe('Eh and Hitomi download queue', () => {
     const store = useEhDownloadStore();
     expect(store.cards.map((card) => card.gid)).toEqual([-802, 801]);
     expect(store.history.find((item) => item.gid === 801)?.queuedAt).toBe('2026-10-11T01:00:00.000Z');
-    store.workerRunning = true;
+    store.workersRunning = { eh: true, hitomi: true };
     store.enqueue('eh', 803, 'never-persist-this-token');
     const admitted = store.queue[0].queuedAt;
     store.rememberResult(ehResult(803), store.queue[0]);
@@ -222,7 +327,7 @@ describe('Eh and Hitomi download queue', () => {
 
   it('replaces only the matching source card when retrying same-number Eh and Hitomi works', () => {
     const store = useEhDownloadStore();
-    store.workerRunning = true;
+    store.workersRunning = { eh: true, hitomi: true };
     store.history = [historyItem(50), historyItem(-50, [{ page: 3, reason: '超时' }])];
     const keys = store.cards.map((card) => card.key);
     store.retryHistoryPages(store.hitomiHistory[0]);
@@ -256,7 +361,7 @@ describe('Eh and Hitomi download queue', () => {
     expect(store.ehHistory[0]).toMatchObject({ downloadedPages: 2, failedPages: [3] });
     store.retryHistoryPages(store.ehHistory[0]);
     await idle(store);
-    expect(mocks.downloadGallery).toHaveBeenLastCalledWith({ gid: 401, token: 'token-401', pageIndices: [3] });
+    expect(mocks.downloadGallery).toHaveBeenLastCalledWith({ gid: 401, token: 'token-401', pageIndices: [3], parallelImages: 3 });
     expect(store.ehHistory[0]).toMatchObject({ downloadedPages: 3, failedPages: [] });
   });
 
@@ -273,7 +378,7 @@ describe('Eh and Hitomi download queue', () => {
     expect(store.hitomiHistory.find((item) => item.gid === -502)?.error).toBeUndefined();
     store.retryHistoryPages(store.hitomiHistory.find((item) => item.gid === -501)!);
     await idle(store);
-    expect(mocks.downloadHitomi).toHaveBeenLastCalledWith({ id: 501, pageIndices: undefined });
+    expect(mocks.downloadHitomi).toHaveBeenLastCalledWith({ id: 501, pageIndices: undefined, parallelImages: 3 });
     expect(store.hitomiHistory.find((item) => item.gid === -501)?.error).toBeUndefined();
   });
 
@@ -290,7 +395,7 @@ describe('Eh and Hitomi download queue', () => {
     mocks.downloadGallery.mockResolvedValueOnce(ehResult(601, 1));
     store.retryHistoryPages(store.history[0]);
     await idle(store);
-    expect(mocks.downloadGallery).toHaveBeenCalledWith({ gid: 601, token: 'token-601', pageIndices: [3] });
+    expect(mocks.downloadGallery).toHaveBeenCalledWith({ gid: 601, token: 'token-601', pageIndices: [3], parallelImages: 3 });
   });
 
   it('recovers old history failures and keeps up to twenty entries per source', () => {

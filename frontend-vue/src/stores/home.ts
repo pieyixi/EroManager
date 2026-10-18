@@ -1,3 +1,4 @@
+import type { WorkDetail } from '../api/contracts/library';
 import { defineStore } from 'pinia';
 import { libraryApi } from '../api/commands/library';
 import { ehApi } from '../api/commands/eh';
@@ -6,10 +7,12 @@ import { createDrawPool, pickNext, recordDraw, sampleItems, type DrawPool } from
 import { useLibraryStore } from './library';
 import { useEhLibraryStore } from './ehLibrary';
 import { useNavigationStore } from './navigation';
+import { accountApi } from '../api/commands/accounts';
+import { accountScope } from '../api/accountContext';
 
 export type DrawSource = 'media' | 'book';
 export type DrawPhase = 'idle' | 'closing' | 'tucking' | 'waiting' | 'opening' | 'settling';
-export interface DrawPreview { key: string; label: string; image: string }
+export interface DrawPreview { key: string; label: string; image: string; aspectRatio?: number }
 export interface DrawSelection { id: number; title: string; cover: string; previews: DrawPreview[] }
 interface DrawLane {
   pool: DrawPool;
@@ -21,28 +24,54 @@ interface DrawLane {
   openingDetail: boolean;
   error: string;
   request: number;
+  owner: string;
 }
 
 function lane(): DrawLane {
-  return { pool: createDrawPool(), current: null, staged: null, retiring: null, phase: 'idle', loading: false, openingDetail: false, error: '', request: 0 };
+  return { pool: createDrawPool(), current: null, staged: null, retiring: null, phase: 'idle', loading: false, openingDetail: false, error: '', request: 0, owner: '' };
 }
 export function drawBusy(value: DrawLane): boolean {
   return value.loading || value.openingDetail || value.phase !== 'idle';
 }
 
 export const useHomeStore = defineStore('home', {
-  state: () => ({ media: lane(), book: lane() }),
+  state: () => ({ media: lane(), book: lane(), enabled: true, persistenceError: '' }),
   actions: {
-    async draw(source: DrawSource, prepare?: (selection: DrawSelection) => Promise<void>): Promise<void> {
+    async restorePools(): Promise<void> {
+      this.enabled = false;
+      const scope = accountScope();
+      const values = await Promise.all(['media', 'book'].map(source => accountApi.get('draw', source, scope)));
+      if (scope !== accountScope()) return;
+      for (const [index, source] of (['media', 'book'] as const).entries()) {
+        const value = JSON.parse(values[index] || '{"seen":[],"recent":[]}') as DrawPool;
+        this[source].pool = { seen: value.seen.filter(Number.isSafeInteger), recent: value.recent.filter(Number.isSafeInteger).slice(-20) };
+      }
+      this.persistenceError = ''; this.enabled = true;
+    },
+    async flushPools(): Promise<void> {
+      if (!accountScope()) return;
+      await Promise.all((['media', 'book'] as const).map(source => accountApi.set('draw', source, JSON.stringify(this[source].pool))));
+      this.persistenceError = '';
+    },
+    async refillAfterTransfer(source: DrawSource, transferredId: number, prepare?: (selection: DrawSelection) => Promise<void>): Promise<void> {
+      const state = this[source];
+      if (drawBusy(state) || state.current?.id !== transferredId) return;
+      // 顶牌已移入手牌，不再创建翻背/塞底快照；保留上一张 ID 作为新抽取的排除条件。
+      state.current = null;
+      await this.draw(source, prepare, transferredId);
+    },
+    async draw(source: DrawSource, prepare?: (selection: DrawSelection) => Promise<void>, previousId?: number): Promise<void> {
+      if (!this.enabled) return;
       const state = this[source];
       if (drawBusy(state)) return;
       state.loading = true;
+      state.owner = accountScope();
       state.error = '';
       state.retiring = state.current;
       state.phase = state.current ? 'closing' : 'waiting';
       const request = ++state.request;
       try {
-        const next = source === 'media' ? await this.pickMedia() : await this.pickBook();
+        const next = source === 'media' ? await this.pickMedia(previousId) : await this.pickBook(previousId);
         if (request !== state.request) return;
         if (next && prepare) await prepare(next);
         if (request !== state.request) return;
@@ -57,11 +86,11 @@ export const useHomeStore = defineStore('home', {
         }
       }
     },
-    async pickMedia(): Promise<DrawSelection | null> {
+    async pickMedia(previousId?: number): Promise<DrawSelection | null> {
       const library = useLibraryStore();
       if (!library.works.length && library.error) await library.initialize();
       if (library.error) throw new Error(library.error);
-      const work = pickNext(library.works, this.media.pool, (item) => item.id, this.media.current?.id);
+      const work = pickNext(library.works, this.media.pool, (item) => item.id, previousId ?? this.media.current?.id);
       if (!work) return null;
       // 抽卡只读取详情，不改正在浏览的详情、筛选、页码或播放器状态。
       const detail = await libraryApi.getWorkDetail(work.id);
@@ -73,11 +102,11 @@ export const useHomeStore = defineStore('home', {
         previews: episodes.map((item) => ({ key: String(item.id), label: `第 ${item.number ?? item.id} 集`, image: images[item.cover_path || ''] || '' })),
       };
     },
-    async pickBook(): Promise<DrawSelection | null> {
+    async pickBook(previousId?: number): Promise<DrawSelection | null> {
       const library = useEhLibraryStore();
       if (!library.galleries.length && library.error) await library.load();
       if (library.error) throw new Error(library.error);
-      const gallery = pickNext(library.galleries, this.book.pool, (item) => item.gid, this.book.current?.id);
+      const gallery = pickNext(library.galleries, this.book.pool, (item) => item.gid, previousId ?? this.book.current?.id);
       if (!gallery) return null;
       const pages = sampleItems(await ehApi.getPages(gallery.gid), 3).sort((a, b) => a.index - b.index);
       const paths = [gallery.cover_path, ...pages.map((item) => item.path)].filter(Boolean);
@@ -92,6 +121,7 @@ export const useHomeStore = defineStore('home', {
       const state = this[source];
       if (state.loading || state.phase !== 'waiting') return;
       const candidate = state.staged;
+      if (state.owner && state.owner !== accountScope()) { state.staged = null; state.phase = 'idle'; return; }
       const exists = candidate && (source === 'media'
         ? useLibraryStore().works.some((item) => item.id === candidate.id)
         : useEhLibraryStore().galleries.some((item) => item.gid === candidate.id));
@@ -100,6 +130,12 @@ export const useHomeStore = defineStore('home', {
         recordDraw(state.pool, source === 'media'
           ? useLibraryStore().works.map((item) => item.id)
           : useEhLibraryStore().galleries.map((item) => item.gid), candidate.id);
+        if (accountScope()) {
+          const scope = accountScope();
+          void accountApi.set('draw', source, JSON.stringify(state.pool), scope).catch(error => {
+            if (scope === accountScope()) this.persistenceError = `抽卡记录未保存：${String(error)}`;
+          });
+        }
       }
       state.staged = null;
       state.phase = state.current ? 'opening' : 'idle';
@@ -151,7 +187,7 @@ export const useHomeStore = defineStore('home', {
         state.phase = 'idle';
       }
     },
-    async openDetail(source: DrawSource, selectedId?: number): Promise<void> {
+    async openDetail(source: DrawSource, selectedId?: number, prepared?: WorkDetail): Promise<void> {
       const state = this[source];
       const id = selectedId ?? state.current?.id;
       if (id === undefined || state.openingDetail || (selectedId === undefined && drawBusy(state))) return;
@@ -162,7 +198,7 @@ export const useHomeStore = defineStore('home', {
       state.error = '';
       try {
         if (source === 'media') {
-          await useLibraryStore().showDetail(id, 'page-home');
+          await useLibraryStore().showDetail(id, 'page-home', prepared);
           if (navigation.activePage === 'page-home' && navigation.pageRevision === revision) throw new Error('无法打开作品详情，请稍后重试');
         }
         else {

@@ -130,16 +130,20 @@ const { chromium } = createRequire(path.join(__dirname, '../package.json'))('pla
           await page.waitForTimeout(740);
           await page.keyboard.press(key);
           await page.waitForTimeout(delay);
-          const expected = await page.evaluate(() => {
+          const pose = await page.evaluate(async () => {
             const front = [...document.querySelectorAll('.home-hand-card')]
               .sort((a, b) => Math.abs(Number(a.dataset.slot)) - Math.abs(Number(b.dataset.slot)))[0];
             const before = { key: front.dataset.cardKey, rect: front.getBoundingClientRect().toJSON() };
             document.querySelector('.home-hand-backdrop').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-            return before;
+            // 同一浏览器帧内取首帧；跨进程 boundingBox 的延迟会把正常动画误判为跳变。
+            await new Promise(requestAnimationFrame);
+            const first = document.querySelector('.home-hand-card.is-main').getBoundingClientRect().toJSON();
+            return { before, first };
           });
+          const expected = pose.before;
           const main = page.locator('.home-hand-card.is-main');
           assert.equal(await main.getAttribute('data-card-key'), expected.key, 'outside click must retain the visually nearest main, not the old selection');
-          const first = await main.boundingBox();
+          const first = pose.first;
           assert(Math.abs(first.x - expected.rect.x) < 5 && Math.abs(first.width - expected.rect.width) < 5, 'interrupting the carousel must preserve the actual screen pose');
           await page.waitForTimeout(1150);
           assert.equal(await main.getAttribute('data-card-key'), expected.key);

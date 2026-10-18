@@ -1,0 +1,20 @@
+const{chromium}=require('playwright');const assert=require('node:assert/strict');const path=require('node:path');const os=require('node:os');
+(async()=>{const browser=await chromium.launch();let cases=0;try{
+for(const[width,height]of [[1920,1080],[1366,768],[1280,720]])for(const theme of ['light','dark']){
+ const page=await browser.newPage({viewport:{width,height}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(process.env.HAND_QA_URL||'http://127.0.0.1:1422');await page.waitForFunction(()=>{const h=document.getElementById('app')?.__vue_app__?.config.globalProperties.$pinia._s.get('home');return h?.media.current&&h?.book.current&&h.media.phase==='idle'&&h.book.phase==='idle'});await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+ for(const source of ['media','book'])for(const mode of width===1366&&theme==='light'?['double','refill']:['refill']){
+ const old=await page.locator(`.home-draw-${source} .home-draw-preview img`).evaluateAll(imgs=>imgs.map(img=>img.currentSrc));assert(old.length>0);
+ await page.evaluate(source=>{window.previewFrames=[];window.capturePreviews=true;const record=()=>{const h=document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('home');const lane=document.querySelector(`.home-draw-${source}`);const rail=lane.querySelector('.home-draw-previews');window.previewFrames.push({phase:h[source].phase,images:[...rail.querySelectorAll('img')].map(img=>img.currentSrc),refreshing:rail.classList.contains('is-refreshing'),foil:h[source].phase==='settling'?getComputedStyle(rail.querySelector('.home-draw-preview-image'),'::after').animationName:''});if(window.capturePreviews)requestAnimationFrame(record)};requestAnimationFrame(record)},source);
+ if(mode==='double')await page.locator(`.home-draw-${source} .home-draw-cover`).dblclick();else{const cover=await page.locator(`.home-draw-${source} .home-draw-cover`).boundingBox();const target=await page.locator('.home-hand-drop-zone').boundingBox();await page.mouse.move(cover.x+cover.width/2,cover.y+cover.height/2);await page.mouse.down();await page.mouse.move(target.x+target.width/2,target.y+target.height/2,{steps:14});await page.mouse.up()}
+ await page.waitForFunction(source=>document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('home')[source].phase==='opening',source);
+ if(width===1366&&theme==='light'){await page.waitForTimeout(650);await page.screenshot({path:path.join(os.tmpdir(),`ero-preview-timing-${source}-${mode}-before-sweep.png`)})}
+ await page.waitForFunction(source=>document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('home')[source].phase==='settling',source);
+ if(width===1366&&theme==='light')await page.screenshot({path:path.join(os.tmpdir(),`ero-preview-timing-${source}-${mode}-sweep.png`)});
+ await page.waitForFunction(source=>document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('home')[source].phase==='idle',source);
+ const frames=await page.evaluate(()=>{window.capturePreviews=false;return window.previewFrames});const current=await page.locator(`.home-draw-${source} .home-draw-preview img`).evaluateAll(imgs=>imgs.map(img=>img.currentSrc));
+ const changing=frames.filter(f=>['closing','tucking','waiting','opening'].includes(f.phase));assert(changing.length>0);assert(changing.every(f=>JSON.stringify(f.images)===JSON.stringify(old)),`${source} ${mode}: preview changed before sweep`);const landing=frames.filter(f=>f.phase==='settling');assert(landing.length>0);assert(landing.every(f=>JSON.stringify(f.images)===JSON.stringify(current)&&f.refreshing&&f.foil==='homeCardFoil'),`${source} ${mode}: preview did not refresh together with sweep`);assert.notEqual(JSON.stringify(old),JSON.stringify(current));cases++;console.log(`PASS ${width} ${theme} ${source} ${mode}: old previews retained, replacement and foil coincide`);
+ }
+ assert.deepEqual(errors,[]);await page.close();
+}
+console.log(`PASS ${cases} preview timing cases`);
+}finally{await browser.close()}})().catch(e=>{console.error(e);process.exit(1)});

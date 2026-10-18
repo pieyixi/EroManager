@@ -5,6 +5,7 @@ import type { UiMessage } from '../api/contracts/settings';
 import { useEhLibraryStore } from './ehLibrary';
 import { useEhSettingsStore } from './ehSettings';
 import { useNavigationStore } from './navigation';
+import { usePreferencesStore } from './preferences';
 
 export type DownloadSource = 'eh' | 'hitomi';
 export interface EhDownloadHistory {
@@ -122,11 +123,15 @@ export const useEhDownloadStore = defineStore('ehDownload', {
     ehGidInput: '', ehTokenInput: '', hitomiIdInput: '',
     messages: { eh: null as UiMessage | null, hitomi: null as UiMessage | null },
     queue: [] as DownloadQueueItem[],
-    workerRunning: false,
+    workersRunning: { eh: false, hitomi: false },
+    notices: [] as { key: string; title: string; source: DownloadSource; failed: boolean }[],
+    libraryRefreshing: false,
+    libraryRefreshPending: false,
     history: readHistory(),
   }),
   getters: {
-    downloading: (state): boolean => state.workerRunning,
+    workerRunning: (state): boolean => state.workersRunning.eh || state.workersRunning.hitomi,
+    downloading(): boolean { return this.workerRunning; },
     ehQueue: (state): DownloadQueueItem[] => state.queue.filter((item) => item.source === 'eh'),
     hitomiQueue: (state): DownloadQueueItem[] => state.queue.filter((item) => item.source === 'hitomi'),
     ehHistory: (state): EhDownloadHistory[] => state.history.filter((item) => item.source === 'eh'),
@@ -145,6 +150,10 @@ export const useEhDownloadStore = defineStore('ehDownload', {
     },
   },
   actions: {
+    announce(key: string, title: string, source: DownloadSource, failed: boolean): void {
+      if (!usePreferencesStore().values.download_notify) return;
+      this.notices = [...this.notices.filter(notice => notice.key !== key), { key, title, source, failed }].slice(-3);
+    },
     persistHistory(): void {
       if (typeof window === 'undefined') return;
       try { window.localStorage.setItem(HISTORY_KEY, JSON.stringify(this.history)); } catch { /* auxiliary only */ }
@@ -184,7 +193,7 @@ export const useEhDownloadStore = defineStore('ehDownload', {
         queuedAt: previous?.queuedAt || this.nextQueuedAt(),
       });
       this.messages[source] = { kind: 'success', text: `已将 ${id} 加入队列` };
-      void this.processQueue();
+      void this.processQueue(source);
       return true;
     },
     enqueueEh(): void {
@@ -205,6 +214,8 @@ export const useEhDownloadStore = defineStore('ehDownload', {
       const item = this.history.find((entry) => entry.gid === gid);
       if (!item || !isDownloadComplete(item)
         || this.queue.some((job) => job.key === workKey(item.source, Math.abs(gid)))) return;
+      const navigation = useNavigationStore();
+      const revision = navigation.pageRevision;
       const library = useEhLibraryStore();
       // 保留带符号的内部 GID，避免 Eh 与 Hitomi 同号作品跳错；历史不充当作品详情。
       let gallery = library.galleries.find((entry) => entry.gid === gid);
@@ -212,7 +223,8 @@ export const useEhDownloadStore = defineStore('ehDownload', {
         await library.load();
         gallery = library.galleries.find((entry) => entry.gid === gid);
       }
-      if (gallery) library.showDetail(gallery);
+      if (navigation.pageRevision !== revision) return;
+      if (gallery) library.showDetail(gallery, 'page-eh-download');
       else this.messages[item.source] = {
         kind: 'err', text: library.error || '当前 本子库中找不到该作品，请确认库目录和入库记录',
       };
@@ -283,18 +295,30 @@ export const useEhDownloadStore = defineStore('ehDownload', {
       return entry;
     },
     async refreshLibrary(): Promise<void> {
+      this.libraryRefreshPending = true;
+      if (this.libraryRefreshing) return;
+      this.libraryRefreshing = true;
       const library = useEhLibraryStore();
-      library.currentSort = 'added-desc';
-      library.currentPage = 1;
-      try { await Promise.all([library.load(), useEhSettingsStore().loadDashboard()]); }
-      catch { /* library can refresh again after the next navigation */ }
+      try {
+        // 两路完成可能重叠：串行刷新共享库，并在有新完成事件时补刷，避免旧结果覆盖新入库。
+        do {
+          this.libraryRefreshPending = false;
+          library.currentSort = 'added-desc';
+          library.currentPage = 1;
+          await Promise.allSettled([library.load(), useEhSettingsStore().loadDashboard()]);
+        } while (this.libraryRefreshPending);
+      } finally { this.libraryRefreshing = false; }
     },
-    async processQueue(): Promise<void> {
-      if (this.workerRunning) return;
-      this.workerRunning = true;
+    async processQueue(source?: DownloadSource): Promise<void> {
+      if (source) await this.processSourceQueue(source);
+      else await Promise.all([this.processSourceQueue('eh'), this.processSourceQueue('hitomi')]);
+    },
+    async processSourceQueue(source: DownloadSource): Promise<void> {
+      if (this.workersRunning[source]) return;
+      this.workersRunning[source] = true;
       try {
         let job: DownloadQueueItem | undefined;
-        while ((job = this.queue.find((item) => item.status === 'queued'))) {
+        while ((job = this.queue.find((item) => item.source === source && item.status === 'queued'))) {
           job.status = 'downloading';
           job.progressText = '正在获取作品信息';
           let stopProgress: (() => void) | undefined;
@@ -302,7 +326,7 @@ export const useEhDownloadStore = defineStore('ehDownload', {
             const active = job;
             const listen = active.source === 'eh' ? ehApi.listenDownloadProgress : ehApi.listenHitomiProgress;
             stopProgress = await listen((event: EhDownloadProgressEvent) => {
-              if (Math.abs(event.gid) !== active.id) return;
+              if (event.gid !== (active.source === 'eh' ? active.id : -active.id)) return;
               active.progressText = event.text;
               active.progressPercent = active.pageIndices?.length && active.totalPages
                 ? Math.min(100, Math.round((active.downloadedPages + event.page) / active.totalPages * 100))
@@ -311,9 +335,12 @@ export const useEhDownloadStore = defineStore('ehDownload', {
             const result = active.source === 'eh'
               ? await ehApi.downloadGallery({
                 gid: active.id, token: tokenVault.get(active.key) || '', pageIndices: active.pageIndices,
+                parallelImages: usePreferencesStore().values.eh_parallel_images,
               })
-              : await ehApi.downloadHitomi({ id: active.id, pageIndices: active.pageIndices });
+              : await ehApi.downloadHitomi({ id: active.id, pageIndices: active.pageIndices,
+                parallelImages: usePreferencesStore().values.hitomi_parallel_images });
             const entry = this.rememberResult(result, active);
+            this.announce(active.key, entry.title || String(active.id), active.source, Boolean(entry.failedPages.length || entry.error));
             if (entry.failedPages.length || entry.error) {
               this.messages[active.source] = { kind: 'err', text: `${active.id} 尚未完成，可从下方卡片重试` };
             } else {
@@ -323,13 +350,14 @@ export const useEhDownloadStore = defineStore('ehDownload', {
             if (result.meta_path) void this.refreshLibrary();
           } catch (error) {
             this.rememberError(job, error);
+            this.announce(job.key, job.title || String(job.id), job.source, true);
             this.messages[job.source] = { kind: 'err', text: `${job.id} 下载失败，可从作品卡片重试` };
           } finally {
             try { stopProgress?.(); } catch { /* best-effort event cleanup */ }
             this.queue = this.queue.filter((item) => item.key !== job?.key);
           }
         }
-      } finally { this.workerRunning = false; }
+      } finally { this.workersRunning[source] = false; }
     },
     async forgetHistory(gid: number): Promise<void> {
       const item = this.history.find((entry) => entry.gid === gid);

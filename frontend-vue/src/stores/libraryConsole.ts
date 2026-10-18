@@ -15,6 +15,7 @@ import { useLibraryStore } from './library';
 import { useNavigationStore } from './navigation';
 
 export type { ConsoleItem, LibraryScan, LibrarySummary, MediaLibraryStatus } from '../api/contracts/library';
+const summaryLoads = new WeakMap<object, { path: string; promise: Promise<boolean> }>();
 
 export function isMissingDirectoryItem(item: ConsoleItem): boolean {
   return Number.isInteger(item.work_id) && item.status === '作品目录不存在';
@@ -56,6 +57,7 @@ export const useLibraryConsoleStore = defineStore('libraryConsole', {
     databaseMessage: null as UiMessage | null,
     duplicateMessage: null as UiMessage | null,
     summary: { archived_count: 0, unarchived_count: 0, episode_count: 0, total_bytes: 0 } as LibrarySummary,
+    summaryLoaded: false, summaryLoading: false, summaryError: '',
     scan: null as LibraryScan | null,
     scanning: false,
     backupRunning: false,
@@ -78,6 +80,7 @@ export const useLibraryConsoleStore = defineStore('libraryConsole', {
   },
   actions: {
     applyMediaLibraryStatus(status: MediaLibraryStatus | null): void {
+      if (status?.root_path && status.root_path !== this.mediaPath) this.summaryLoaded = false;
       this.mediaLibrary = status;
       if (!status) return;
       if (status.root_path) this.mediaPath = status.root_path;
@@ -128,14 +131,30 @@ export const useLibraryConsoleStore = defineStore('libraryConsole', {
         this.libraryMessage = { kind: 'err', text: `绑定失败: ${errorText(error)}` };
       }
     },
-    async loadSummary(): Promise<void> {
+    async loadSummary(): Promise<boolean> {
       const path = this.mediaPath.trim();
-      if (!path) return;
-      try {
-        this.summary = await libraryApi.getSummary(path);
-      } catch (error) {
-        this.libraryMessage = { kind: 'err', text: `统计失败：${errorText(error)}` };
-      }
+      if (!path) return false;
+      const pending = summaryLoads.get(this);
+      if (pending?.path === path) return pending.promise;
+      this.summaryLoading = true; this.summaryError = '';
+      const promise = (async () => {
+        try {
+          const result = await libraryApi.getSummary(path);
+          if (path !== this.mediaPath.trim()) return false;
+          this.summary = result; this.summaryLoaded = true;
+          if (this.libraryMessage?.text.startsWith('统计失败：')) this.libraryMessage = null;
+          return true;
+        } catch (error) {
+          if (path === this.mediaPath.trim()) {
+            this.summaryError = `统计失败：${errorText(error)}`;
+            this.libraryMessage = { kind: 'err', text: this.summaryError };
+          }
+          return false;
+        }
+      })();
+      summaryLoads.set(this, { path, promise });
+      try { return await promise; }
+      finally { if (summaryLoads.get(this)?.promise === promise) { summaryLoads.delete(this); this.summaryLoading = false; } }
     },
     setProgress(active: boolean, percent: number, text: string): void {
       this.progressActive = active;
@@ -187,6 +206,7 @@ export const useLibraryConsoleStore = defineStore('libraryConsole', {
         await this.ensureMediaLibraryPath(path);
         this.scan = await libraryApi.scanChanges(path);
         this.summary = this.scan.summary;
+        this.summaryLoaded = true;
         window.clearInterval(timer);
         this.setProgress(true, 100, '扫描完成');
         window.setTimeout(() => this.setProgress(false, 0, ''), 650);
@@ -254,7 +274,7 @@ export const useLibraryConsoleStore = defineStore('libraryConsole', {
     },
     async backupDataPackage(): Promise<void> {
       if (this.busy) return;
-      const path = this.backupPath.trim() || 'D:\\Ark\\hanime-data-backup.zip';
+      const path = this.backupPath.trim() || 'D:\\Ark\\ero-data-backup.zip';
       this.backupRunning = true;
       this.databaseMessage = null;
       this.setProgress(true, 1, '正在准备资料包备份');

@@ -1,7 +1,7 @@
 {
   "ids": [
     "archiveCharacters", "archiveCoverDrop", "archiveDir", "archiveEpisodes", "archiveJsonPaste",
-    "archiveMsg", "archiveProgressRing", "archiveRatioBar", "archiveStudio", "archiveSynopsis", "archiveTitle",
+    "archiveMsg", "archiveRatioBar", "archiveStudio", "archiveSynopsis", "archiveTitle",
     "btnOpenFolder", "captureEpisodeBtn", "confirmBody", "confirmModal", "confirmTitle", "consoleProgress",
     "consoleProgressBar", "consoleProgressText", "consoleScanButton", "coverGrid",
     "ctxDeleteWork", "ctxRefreshEh", "ctxRefreshHome", "dbFilePath", "dbMsg", "detailCover", "detailDesc", "detailTags",

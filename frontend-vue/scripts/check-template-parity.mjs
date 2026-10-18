@@ -3,12 +3,14 @@ import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const contract = JSON.parse(readFileSync(resolve(root, 'scripts', 'ui-contract.json'), 'utf8'));
-const componentDir = resolve(root, 'src', 'components');
-const componentHtml = readdirSync(componentDir)
-  .filter((name) => name.endsWith('.vue'))
-  .sort()
-  .map((name) => readFileSync(resolve(componentDir, name), 'utf8'))
-  .join('\n');
+// 页面和业务组件可以分目录；契约必须递归检查所有 Vue 模板，而非只看 components 根层。
+function readTemplates(directory) {
+  return readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => {
+    const file = resolve(directory, entry.name);
+    return entry.isDirectory() ? readTemplates(file) : entry.name.endsWith('.vue') ? [readFileSync(file, 'utf8')] : [];
+  });
+}
+const componentHtml = readTemplates(resolve(root, 'src')).join('\n');
 
 function readSourceTree(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -40,7 +42,7 @@ function compare(label, expected, actual) {
   throw new Error(`${label} differs from the UI contract\n  ${details}`);
 }
 
-const componentIds = unique(values(componentHtml, /(?:^|\s)id="([^"]+)"/gm));
+const componentIds = unique(values(componentHtml, /(?:^|\s)(?:id|jump-input-id)="([^"]+)"/gm));
 compare('DOM ids', contract.ids.slice().sort(), componentIds);
 
 const handlerPattern = /\bon(?:click|input|focus|blur|keydown|mouseenter|mouseleave|pointerdown|pointermove|pointerup|pointercancel|pointerleave)="([^"]+)"/g;

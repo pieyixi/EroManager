@@ -1,9 +1,12 @@
 //! SQLite connection and path/settings persistence for the Eh library.
+use crate::eh::metadata::directory_size;
 use crate::eh::models::{EhGallerySummary, EhSettings};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 const EH_DATABASE_FILE: &str = "eh-database.db";
+static EH_SCHEMA: Mutex<()> = Mutex::new(());
 pub(crate) fn portable_path(path: &Path) -> String {
     let value = path.to_string_lossy();
     if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
@@ -11,17 +14,13 @@ pub(crate) fn portable_path(path: &Path) -> String {
     }
     value.strip_prefix(r"\\?\").unwrap_or(&value).to_string()
 }
-pub(crate) fn eh_db_path() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(EH_DATABASE_FILE)
+pub(crate) fn eh_db_path() -> Result<PathBuf, String> {
+    crate::paths::portable_database_path(EH_DATABASE_FILE)
+        .map_err(|error| format!("无法定位本子数据库: {error}"))
 }
 
 pub(crate) fn open_eh_db() -> Result<Connection, String> {
-    let path = eh_db_path();
+    let path = eh_db_path()?;
     let connection = Connection::open(&path)
         .map_err(|error| format!("无法打开 本子数据库 {}: {error}", path.display()))?;
     initialize_eh_schema(&connection)?;
@@ -29,6 +28,8 @@ pub(crate) fn open_eh_db() -> Result<Connection, String> {
 }
 
 pub(crate) fn initialize_eh_schema(connection: &Connection) -> Result<(), String> {
+    // 启动时多个只读命令会同时打开旧库；字段检查与 ALTER 必须串行。
+    let _schema_guard = EH_SCHEMA.lock().map_err(|error| error.to_string())?;
     connection
         .execute_batch(
             "PRAGMA journal_mode=WAL;
@@ -51,9 +52,18 @@ pub(crate) fn initialize_eh_schema(connection: &Connection) -> Result<(), String
                Source TEXT NOT NULL DEFAULT 'eh',
                SourceId TEXT NOT NULL DEFAULT '',
                Language TEXT NOT NULL DEFAULT '',
+               TotalBytes INTEGER CHECK(TotalBytes>=0),
                AddedAt TEXT NOT NULL DEFAULT (datetime('now','localtime')),
                UpdatedAt TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-             );",
+             );
+             CREATE TABLE IF NOT EXISTS EhFavoriteGalleries (
+               Gid INTEGER PRIMARY KEY,
+               CreatedAt TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+             );
+             CREATE TRIGGER IF NOT EXISTS EhGalleries_DeleteFavorite
+             AFTER DELETE ON EhGalleries BEGIN
+               DELETE FROM EhFavoriteGalleries WHERE Gid=OLD.Gid;
+             END;",
         )
         .map_err(|error| error.to_string())?;
     let has_added_at = connection
@@ -72,6 +82,7 @@ pub(crate) fn initialize_eh_schema(connection: &Connection) -> Result<(), String
         ("Source", "TEXT NOT NULL DEFAULT 'eh'"),
         ("SourceId", "TEXT NOT NULL DEFAULT ''"),
         ("Language", "TEXT NOT NULL DEFAULT ''"),
+        ("TotalBytes", "INTEGER CHECK(TotalBytes>=0)"),
     ] {
         let exists = connection
             .prepare("PRAGMA table_info(EhGalleries)")
@@ -85,7 +96,7 @@ pub(crate) fn initialize_eh_schema(connection: &Connection) -> Result<(), String
                 .execute_batch(&format!(
                     "ALTER TABLE EhGalleries ADD COLUMN {name} {definition};"
                 ))
-                .map_err(|error| format!("升级 Eh 来源字段失败: {error}"))?;
+                .map_err(|error| format!("升级本子库字段失败: {error}"))?;
         }
     }
     connection
@@ -174,16 +185,21 @@ fn upsert_gallery_internal(
     gallery: &EhGallerySummary,
     refresh_added_at: bool,
 ) -> Result<(), String> {
+    // 扫描、Eh 下载/重试、Hitomi 完整入库共用此处；统计页不再重复读每张图片。
+    let total_bytes =
+        i64::try_from(directory_size(Path::new(&gallery.folder_path))).unwrap_or(i64::MAX);
     connection
         .execute(
-            "INSERT INTO EhGalleries(Gid,Token,Title,Category,ArtistJson,GroupJson,TagsJson,Pages,Posted,CoverPath,FolderPath,Source,SourceId,Language,AddedAt,UpdatedAt)
+            "INSERT INTO EhGalleries(Gid,Token,Title,Category,ArtistJson,GroupJson,TagsJson,Pages,Posted,CoverPath,FolderPath,Source,SourceId,Language,TotalBytes,AddedAt,UpdatedAt)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?13,?14,?15,
+                ?16,
                 strftime('%Y-%m-%d %H:%M:%f','now','localtime'),
                 strftime('%Y-%m-%d %H:%M:%f','now','localtime'))
              ON CONFLICT(Gid) DO UPDATE SET Token=excluded.Token,Title=excluded.Title,Category=excluded.Category,
              ArtistJson=excluded.ArtistJson,GroupJson=excluded.GroupJson,TagsJson=excluded.TagsJson,Pages=excluded.Pages,
              Posted=excluded.Posted,CoverPath=excluded.CoverPath,FolderPath=excluded.FolderPath,
              Source=excluded.Source,SourceId=excluded.SourceId,Language=excluded.Language,
+             TotalBytes=excluded.TotalBytes,
              AddedAt=CASE WHEN ?12 THEN excluded.AddedAt ELSE COALESCE(NULLIF(EhGalleries.AddedAt,''),excluded.AddedAt) END,
              UpdatedAt=excluded.UpdatedAt",
             params![
@@ -202,6 +218,7 @@ fn upsert_gallery_internal(
                 gallery.source,
                 gallery.source_id,
                 gallery.language,
+                total_bytes,
             ],
         )
         .map(|_| ())
@@ -266,6 +283,7 @@ mod tests {
             );",
             )
             .unwrap();
+        initialize_eh_schema(&connection).unwrap();
         upsert_gallery(&connection, &gallery()).unwrap();
         let inserted: Option<String> = connection
             .query_row("SELECT AddedAt FROM EhGalleries", [], |row| row.get(0))
@@ -299,6 +317,17 @@ mod tests {
         VALUES(123,'token','Eh work',2,'[]','[]','[]',1,'2020-01-01','','eh-folder');").unwrap();
         initialize_eh_schema(&connection).unwrap();
         let mut hitomi = gallery();
+        let old_size: Option<i64> = connection
+            .query_row(
+                "SELECT TotalBytes FROM EhGalleries WHERE Gid=123",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            old_size, None,
+            "migration must mark old capacity unknown rather than invent zero"
+        );
         hitomi.gid = -123;
         hitomi.token.clear();
         hitomi.source = "hitomi".into();

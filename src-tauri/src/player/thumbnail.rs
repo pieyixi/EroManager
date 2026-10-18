@@ -208,7 +208,8 @@ impl ThumbnailDecoder {
 }
 
 fn thumbnail_mpv_library_path() -> ThumbnailPathBuf {
-    std::env::var_os("HANIME_MPV_LIBRARY")
+    std::env::var_os("ERO_MPV_LIBRARY")
+        .or_else(|| std::env::var_os("HANIME_MPV_LIBRARY"))
         .map(ThumbnailPathBuf::from)
         .unwrap_or_else(|| portable_app_dir().join("lib").join("libmpv-2.dll"))
 }
@@ -494,7 +495,9 @@ mod thumbnail_tests {
 
     #[test]
     fn decodes_real_frames_without_a_window() {
-        let Some(video_path) = std::env::var_os("HANIME_TEST_VIDEO") else {
+        let Some(video_path) =
+            std::env::var_os("ERO_TEST_VIDEO").or_else(|| std::env::var_os("HANIME_TEST_VIDEO"))
+        else {
             return;
         };
         let (mut decoder, first) =
@@ -512,7 +515,9 @@ mod thumbnail_tests {
 
     #[test]
     fn decodes_with_two_windowless_workers() {
-        let Some(video_path) = std::env::var_os("HANIME_TEST_VIDEO") else {
+        let Some(video_path) =
+            std::env::var_os("ERO_TEST_VIDEO").or_else(|| std::env::var_os("HANIME_TEST_VIDEO"))
+        else {
             return;
         };
         let first_path = video_path.clone();

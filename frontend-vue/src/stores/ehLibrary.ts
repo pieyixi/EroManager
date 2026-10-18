@@ -1,3 +1,4 @@
+import { accountScope } from '../api/accountContext';
 import { defineStore } from "pinia";
 import { ehApi } from "../api/commands/eh";
 import { mediaApi } from "../api/commands/media";
@@ -48,6 +49,9 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
     loading: false,
     error: "",
     currentGallery: null as EhGallerySummary | null,
+    favoriteGids: [] as number[],
+    favoriteMode: false,
+    favoriteSaving: [] as number[],
   }),
   getters: {
     filteredGalleries(state): EhGallerySummary[] {
@@ -59,6 +63,7 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
             ? gallery.tags
             : gallery[key];
       return state.galleries
+        .filter(gallery => !state.favoriteMode || state.favoriteGids.includes(gallery.gid))
         .filter((gallery) =>
           (
             Object.entries(state.activeFilters) as Array<
@@ -113,7 +118,7 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
     },
     showClearButton(state): boolean {
       return Boolean(
-        state.search.trim() ||
+        state.search.trim() || state.favoriteMode ||
           Object.values(state.activeFilters).some((items) => items.length),
       );
     },
@@ -124,15 +129,19 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
       if (!this.overview && !this.loading) await this.load();
     },
     async load(): Promise<void> {
+      const owner = accountScope();
       this.loading = true;
       this.error = "";
       try {
-        const [overview, galleries] = await Promise.all([
+        const [overview, galleries, favorites] = await Promise.all([
           ehApi.getOverview(),
           ehApi.listGalleries(),
+          ehApi.getFavorites(),
         ]);
         this.overview = overview;
         this.galleries = galleries;
+        if (owner === accountScope()) this.favoriteGids = favorites;
+        if (!favorites.length) this.favoriteMode = false;
         void this.loadVisibleCovers();
       } catch (error) {
         this.error = error instanceof Error ? error.message : String(error);
@@ -200,6 +209,35 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
       this.search = "";
       this.activeFilters = {} as Record<EhFilterKey, string[]>;
       this.currentPage = 1;
+      this.favoriteMode = false;
+    },
+    isFavorite(gid: number): boolean {
+      return this.favoriteGids.includes(gid);
+    },
+    async toggleFavorite(gid: number): Promise<void> {
+      if (this.favoriteSaving.includes(gid)) return;
+      this.favoriteSaving.push(gid);
+      try {
+        const owner = accountScope();
+        const favorite = await ehApi.setFavorite(gid, !this.isFavorite(gid));
+        if (owner !== accountScope()) return;
+        // 只合并本次作品的结果，避免不同作品并行保存时旧响应覆盖新状态。
+        this.favoriteGids = favorite
+          ? [...new Set([...this.favoriteGids, gid])]
+          : this.favoriteGids.filter(value => value !== gid);
+        if (!this.favoriteGids.length) this.favoriteMode = false;
+        this.currentPage = Math.min(this.currentPage, this.totalPages);
+      } catch (error) {
+        console.error('toggle book favorite failed:', error);
+      } finally {
+        this.favoriteSaving = this.favoriteSaving.filter(value => value !== gid);
+      }
+    },
+    toggleFavoriteMode(): void {
+      if (!this.favoriteGids.length) return;
+      this.favoriteMode = !this.favoriteMode;
+      this.currentPage = 1;
+      this.closeDropdown();
     },
     jumpToSingleFilter(key: EhFilterKey, value: string): void {
       this.search = "";
@@ -296,6 +334,8 @@ export const useEhLibraryStore = defineStore("ehLibrary", {
         if (deleteFolder) await ehApi.deleteFolder(gid);
         else await ehApi.deleteRecord(gid);
         this.galleries = this.galleries.filter((item) => item.gid !== gid);
+        this.favoriteGids = this.favoriteGids.filter(value => value !== gid);
+        if (!this.favoriteGids.length) this.favoriteMode = false;
         const nextCache = { ...this.coverCache };
         delete nextCache[gallery.cover_path];
         this.coverCache = nextCache;

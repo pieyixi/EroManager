@@ -8,6 +8,22 @@ vi.mock('../api/commands/library', () => ({ libraryApi: { deleteWork: vi.fn().mo
 beforeEach(() => { setActivePinia(createPinia()); });
 
 describe('independent home and library navigation', () => {
+  it('preserves download detail origin through the reader, then returns downloads to home', () => {
+    const navigation = useNavigationStore();
+    navigation.showPage('page-eh-download');
+    navigation.showPage('page-detail', 'page-eh-download');
+    navigation.showPage('page-eh-reader');
+    navigation.showPage('page-detail');
+    expect(navigation.backPage).toBe('page-eh-download');
+    navigation.goBack();
+    expect(navigation.activePage).toBe('page-eh-download');
+    navigation.goBack();
+    expect(navigation.activePage).toBe('page-home');
+    navigation.showPage('page-eh-library');
+    navigation.detailSource = 'eh';
+    navigation.showPage('page-detail');
+    expect(navigation.backPage).toBe('page-eh-library');
+  });
   it.each(['page-player', 'page-eh-reader'] as const)('preserves home detail origin through %s and resets it for a library detail', (immersive) => {
     const navigation = useNavigationStore();
     navigation.showPage('page-detail', 'page-home');
@@ -42,19 +58,19 @@ describe('independent home and library navigation', () => {
     expect(navigation.backPage).toBe(source === 'media' ? 'page-media-library' : 'page-eh-library');
   });
 
-  it.each(['page-home', 'page-media-library', 'page-eh-library', 'page-settings', 'page-unarchived', 'page-archive'] as const)(
-    'returns from downloads to its actual entry %s, including repeated sidebar clicks', (origin) => {
+  it.each(['page-home', 'page-media-library', 'page-eh-library', 'page-settings', 'page-unarchived', 'page-archive', 'page-detail'] as const)(
+    'returns from downloads to home when entered from %s, including repeated sidebar clicks', (origin) => {
       const navigation = useNavigationStore();
       navigation.showPage(origin);
       navigation.showPage('page-eh-download');
       navigation.showPage('page-eh-download');
-      expect(navigation.backPage).toBe(origin);
+      expect(navigation.backPage).toBe('page-home');
       navigation.goBack();
-      expect(navigation.activePage).toBe(origin);
+      expect(navigation.activePage).toBe('page-home');
     },
   );
 
-  it('updates the download return target on each new visit', () => {
+  it('does not remember the previous download entry on later visits', () => {
     const navigation = useNavigationStore();
     navigation.showPage('page-settings');
     navigation.showPage('page-eh-download');
@@ -62,15 +78,15 @@ describe('independent home and library navigation', () => {
     navigation.showPage('page-eh-library');
     navigation.showPage('page-eh-download');
     navigation.goBack();
-    expect(navigation.activePage).toBe('page-eh-library');
+    expect(navigation.activePage).toBe('page-home');
   });
 
-  it('preserves a home-origin detail when returning from downloads, but clears it for a new detail', () => {
+  it('returns home from downloads entered through details and uses the library for a new detail', () => {
     const navigation = useNavigationStore();
     navigation.showPage('page-detail', 'page-home');
     navigation.showPage('page-eh-download');
     navigation.goBack();
-    expect(navigation.activePage).toBe('page-detail');
+    expect(navigation.activePage).toBe('page-home');
     expect(navigation.backPage).toBe('page-home');
     navigation.showPage('page-eh-download');
     navigation.detailSource = 'eh';

@@ -1,5 +1,7 @@
 fn main() {
     println!("cargo:rerun-if-changed=../frontend-vue/dist");
+    // 图标仅替换像素时也必须重新嵌入 EXE 和窗口图标，不能沿用旧构建缓存。
+    println!("cargo:rerun-if-changed=icons");
     copy_libmpv_runtime_libs();
     tauri_build::build();
 }

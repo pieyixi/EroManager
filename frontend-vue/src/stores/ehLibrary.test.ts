@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ehApi } from '../api/commands/eh';
 import { createPinia, setActivePinia } from "pinia";
 import { ehDisplayValue, useEhLibraryStore, type EhGallerySummary } from "./ehLibrary";
 
@@ -86,5 +87,48 @@ describe("Eh translated metadata", () => {
     store.clearFilter('tag');
     store.toggleFilter('category', '4');
     expect(store.filteredGalleries.map((item) => item.gid)).toEqual([-123]);
+  });
+});
+
+describe('book favorites', () => {
+  beforeEach(() => { setActivePinia(createPinia()); vi.restoreAllMocks(); });
+
+  it('filters signed source IDs independently and composes with search/tags', () => {
+    const store = useEhLibraryStore();
+    store.galleries = [gallery, { ...gallery, gid: -1, source: 'hitomi', title: 'Hitomi book' }];
+    store.favoriteGids = [-1]; store.currentPage = 5;
+    store.toggleFavoriteMode();
+    expect(store.currentPage).toBe(1);
+    expect(store.filteredGalleries.map(item => item.gid)).toEqual([-1]);
+    store.search = '测试'; expect(store.filteredGalleries).toEqual([]);
+    store.search = ''; store.toggleFilter('tag', 'missing'); expect(store.filteredGalleries).toEqual([]);
+    expect(store.showClearButton).toBe(true);
+    store.clearSearchAndFilters();
+    expect(store.favoriteMode).toBe(false); expect(store.filteredGalleries).toHaveLength(2);
+  });
+
+  it('merges out-of-order saves and ignores duplicate clicks while saving', async () => {
+    const store = useEhLibraryStore();
+    const resolve: Array<(favorite: boolean) => void> = [];
+    const save = vi.spyOn(ehApi, 'setFavorite').mockImplementation(() => new Promise(done => resolve.push(done)));
+    const first = store.toggleFavorite(1), second = store.toggleFavorite(-1);
+    await store.toggleFavorite(1);
+    expect(save).toHaveBeenCalledTimes(2);
+    resolve[1](true); await second; resolve[0](true); await first;
+    expect(new Set(store.favoriteGids)).toEqual(new Set([1, -1]));
+    expect(store.favoriteSaving).toEqual([]);
+    save.mockResolvedValue(false);
+    await store.toggleFavorite(1); expect(store.favoriteGids).toEqual([-1]);
+    store.favoriteMode = true;
+    await store.toggleFavorite(-1); expect(store.favoriteMode).toBe(false);
+  });
+
+  it('keeps the last confirmed favorite state on a failed save', async () => {
+    const store = useEhLibraryStore(); store.favoriteGids = [1];
+    vi.spyOn(ehApi, 'setFavorite').mockRejectedValue(new Error('disk unavailable'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await store.toggleFavorite(1);
+    expect(store.favoriteGids).toEqual([1]); expect(store.favoriteSaving).toEqual([]);
+    expect(log).toHaveBeenCalledOnce();
   });
 });

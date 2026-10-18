@@ -15,6 +15,7 @@ doc/
 Eh_Info/
 AGENTS.md
 HANDOFF.md
+HANDOFF2.md
 frontend-vue/node_modules/
 frontend-vue/dist/
 *.db.*
@@ -24,3 +25,5 @@ frontend-vue/dist/
 *.sqlite3-wal
 .env
 .env.*
+__pycache__/
+*.pyc

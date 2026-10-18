@@ -18,6 +18,8 @@
   "fileSize": {
     "maxLines": 500,
     "maxBytes": 60000,
-    "allowlist": {}
+    "allowlist": {
+      "src/features/player/controller.ts": "原生 mpv 生命周期、切集与首帧保护保持整体；偏好及进度已独立到 preferences.ts，不按行数拆碎状态机。"
+    }
   }
 }

@@ -13,6 +13,7 @@ export interface TauriWindowHandle {
   close(): Promise<void>;
   startDragging(): Promise<void>;
   isMaximized(): Promise<boolean>;
+  isMinimized?(): Promise<boolean>;
   isFullscreen(): Promise<boolean>;
   setFullscreen(fullscreen: boolean): Promise<void>;
   onResized(handler: () => void): Promise<() => void>;
@@ -44,6 +45,7 @@ function core(): TauriCore | undefined {
 function browserMockEnabled(): boolean {
   return import.meta.env.DEV && !core();
 }
+export { browserMockEnabled as isBrowserMockRuntime };
 
 export function isTauriConnected(): boolean {
   return Boolean(core()) || browserMockEnabled();

@@ -1,0 +1,132 @@
+const {chromium}=require('playwright');
+const assert=require('node:assert/strict');
+const path=require('node:path');
+const os=require('node:os');
+(async()=>{
+  const browser=await chromium.launch();let cases=0;
+  try{
+    for(const [width,height] of [[1920,1080],[1366,768],[1280,720]])for(const theme of ['light','dark'])await verify(width,height,theme);
+    console.log(`PASS ${cases} profile cases: reference menu/icons/colors, internal-row blank dismissal, Escape/scroll/navigation, inline nickname/Enter/blur/cancel/read-only ID, circular drag/zoom/cancel/export, invalid file and geometry.`);
+  }finally{await browser.close();}
+  async function verify(width,height,theme){
+    const page=await browser.newPage({viewport:{width,height}}),errors=[];
+    page.on('pageerror',e=>errors.push(e.message));
+    await page.addInitScript(theme=>{
+      localStorage.setItem('media-library-theme',theme);localStorage.setItem('media-library-theme-mode',theme);
+      localStorage.setItem('ero-browser-preferences-v1',JSON.stringify({theme}));
+      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{if(window.__copyFail)throw new Error('clipboard denied');window.__copiedId=value;}}});
+    },theme);
+    await page.goto('http://127.0.0.1:1422/?preview=settings');
+    await page.locator('.startup-screen').waitFor({state:'detached'});
+    const themeBlue=await page.locator('.settings-avatar').evaluate(e=>getComputedStyle(e).color);
+    const trigger=page.getByRole('button',{name:'切换或退出账号',exact:true}),menu=page.getByRole('menu',{name:'账号操作'});
+    assert.equal(await page.locator('.settings-local-badge').count(),0);
+    assert.equal(await page.getByText('当前设备 · 本地使用',{exact:true}).count(),0);
+    await trigger.click();await menu.waitFor();
+    assert.equal(await menu.getByRole('menuitem').count(),3);
+    assert.deepEqual(await menu.getByRole('menuitem').allTextContents(),['切换账号','立即锁定','退出登录']);
+    assert.equal(await menu.getByRole('menuitem',{name:'立即锁定'}).evaluate(e=>getComputedStyle(e).color),await menu.getByRole('menuitem',{name:'切换账号'}).evaluate(e=>getComputedStyle(e).color));
+    assert.equal(await menu.getByRole('menuitem',{name:'退出登录'}).evaluate(e=>getComputedStyle(e).color),'rgb(255, 77, 79)');
+    assert.equal(await menu.locator('svg').count(),3);
+    await page.waitForFunction(()=>{const menu=document.querySelector('.profile-account-menu');return menu&&getComputedStyle(menu).opacity==='1'&&!menu.classList.contains('settings-select-menu-enter-active')});
+    await page.screenshot({path:path.join(os.tmpdir(),`ero-profile-menu-${width}-${theme}.png`)});
+    // The profile row spans the page; its blank part must count as outside the small menu.
+    const row=await page.locator('.settings-profile').boundingBox();
+    await page.mouse.click(row.x+row.width-20,row.y+30);await menu.waitFor({state:'detached'});
+    await trigger.click();await page.keyboard.press('ArrowDown');
+    assert(await menu.getByRole('menuitem',{name:'立即锁定'}).evaluate(e=>e===document.activeElement));
+    await page.keyboard.press('ArrowDown');
+    assert(await menu.getByRole('menuitem',{name:'退出登录'}).evaluate(e=>e===document.activeElement));
+    await page.keyboard.press('Escape');await menu.waitFor({state:'detached'});
+    await trigger.click();await menu.getByRole('menuitem',{name:'退出登录'}).click();await menu.waitFor({state:'detached'});
+    await page.getByRole('dialog',{name:'隐私锁',exact:true}).waitFor();
+    await page.waitForFunction(()=>!document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('accounts').busy);
+    await page.getByRole('button',{name:'进入 本地资料库 0001',exact:true}).click();
+    await page.locator('.account-curtain').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'设置',exact:true}).click();
+    assert.equal(await page.locator('.profile-name strong').textContent(),'本地资料库','Persisted profile must survive logout and re-entry');
+    await trigger.click();await page.locator('.settings-scroll').evaluate(e=>{e.scrollTop=90});await menu.waitFor({state:'detached'});
+    await page.locator('.settings-scroll').evaluate(e=>{e.scrollTop=0});
+    await page.getByRole('button',{name:'编辑账号',exact:true}).click();
+    const editor=page.getByRole('dialog',{name:'账号资料',exact:true});await editor.waitFor();
+    assert.deepEqual(await editor.locator('.profile-detail-row>span:first-child').allTextContents(),['头像','昵称','ID']);
+    assert.equal(await editor.locator('.profile-id').textContent(),'0001');
+    assert.equal(await editor.locator('.profile-id-row input').count(),0);
+    assert.equal(await editor.getByRole('button',{name:'复制 ID',exact:true}).count(),1);
+    const accountStyle=await editor.evaluate(e=>({width:e.getBoundingClientRect().width,padding:getComputedStyle(e).padding,borderRadius:getComputedStyle(e).borderRadius,title:getComputedStyle(e.querySelector('h3')).fontSize,
+      rows:[...e.querySelectorAll('.profile-detail-row')].map(n=>n.getBoundingClientRect().height),avatar:e.querySelector('.profile-editor-avatar').getBoundingClientRect().width}));
+    assert.deepEqual(accountStyle,{width:400,padding:'24px',borderRadius:'16px',title:'18px',rows:[80,56,56],avatar:56},'Account card must match the supplied reference dimensions');
+    await page.screenshot({path:path.join(os.tmpdir(),`ero-profile-editor-${width}-${theme}.png`)});
+    await editor.getByRole('button',{name:'复制 ID',exact:true}).click();
+    assert.equal(await page.evaluate(()=>window.__copiedId),'0001');assert.equal(await editor.getByRole('status').textContent(),'已复制');
+    await page.evaluate(()=>{window.__copyFail=true;});await editor.getByRole('button',{name:'复制 ID',exact:true}).click();
+    assert.equal(await editor.getByRole('status').textContent(),'复制失败');await page.evaluate(()=>{window.__copyFail=false;});
+    await editor.getByRole('button',{name:/^昵称/}).click();
+    const name=editor.getByRole('textbox',{name:'昵称',exact:true}),beforeName=await editor.boundingBox();
+    assert.equal(await name.evaluate(e=>getComputedStyle(e).borderTopColor),themeBlue,'Nickname focus border must use the application theme blue');
+    assert.equal(await page.getByRole('dialog').count(),1,'Nickname must edit inside the existing account card');
+    await name.fill('');await name.press('Enter');await editor.getByRole('alert').waitFor();
+    await name.fill('取消的昵称');await name.press('Escape');assert(await editor.isVisible());
+    assert.equal(await editor.locator('.profile-nickname-value').textContent(),'本地资料库');
+    await editor.getByRole('button',{name:/^昵称/}).click();
+    await name.fill('点击别处确认');await editor.locator('.profile-id').click();
+    assert.equal(await editor.locator('.profile-nickname-value').textContent(),'点击别处确认');
+    await editor.getByRole('button',{name:/^昵称/}).click();
+    await name.fill('樱庭'.repeat(12));
+    await page.screenshot({path:path.join(os.tmpdir(),`ero-profile-inline-name-${width}-${theme}.png`)});
+    assert.deepEqual(await editor.boundingBox(),beforeName,'Inline editing must retain card geometry');
+    await name.press('Enter');await name.waitFor({state:'detached'});
+    assert.equal(await editor.locator('.profile-nickname-value').textContent(),'樱庭'.repeat(12));
+    const png=await page.evaluate(()=>{
+      const c=document.createElement('canvas');c.width=600;c.height=300;const x=c.getContext('2d');
+      x.fillStyle='#f44336';x.fillRect(0,0,300,150);x.fillStyle='#4caf50';x.fillRect(300,0,300,150);
+      x.fillStyle='#2196f3';x.fillRect(0,150,300,150);x.fillStyle='#ffeb3b';x.fillRect(300,150,300,150);
+      return c.toDataURL('image/png').split(',')[1];
+    });
+    const picker=editor.getByLabel('选择本地头像');
+    await picker.setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+    let crop=page.getByRole('dialog',{name:'编辑头像',exact:true});
+    await crop.locator('.avatar-crop-stage>img').waitFor();
+    assert.equal(await crop.evaluate(e=>getComputedStyle(e).borderRadius),'16px');
+    assert.equal(await crop.locator('.avatar-crop-stage').evaluate(e=>getComputedStyle(e).borderRadius),'12px');
+    assert.equal(await crop.getByRole('button',{name:'确定',exact:true}).evaluate(e=>e.getBoundingClientRect().height),34);
+    assert.equal(await crop.getByRole('button',{name:'缩小头像',exact:true}).evaluate(e=>e.getBoundingClientRect().width),32);
+    assert.equal(await crop.getByRole('slider',{name:'头像缩放'}).evaluate(e=>getComputedStyle(e).accentColor),themeBlue,'Crop zoom must use the application theme blue');
+    assert.equal(await crop.getByRole('button',{name:'确定',exact:true}).evaluate(e=>getComputedStyle(e).backgroundColor),themeBlue,'Crop confirmation must use the application theme blue');
+    await crop.getByRole('button',{name:'取消',exact:true}).click();await crop.waitFor({state:'detached'});
+    assert.equal(await editor.locator('.profile-editor-avatar img').count(),0,'Cancel must not apply the selected image');
+    // The same file may be selected again after cancellation.
+    await picker.setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+    await crop.locator('.avatar-crop-stage>img').waitFor();
+    await crop.getByRole('slider',{name:'头像缩放'}).fill('2');
+    const stage=await crop.locator('.avatar-crop-stage').boundingBox();
+    await page.mouse.move(stage.x+stage.width/2,stage.y+stage.height/2);await page.mouse.down();
+    await page.mouse.move(stage.x+stage.width/2+40,stage.y+stage.height/2+30,{steps:8});await page.mouse.up();
+    assert(await crop.locator('.avatar-crop-stage>img').evaluate(e=>parseFloat(e.style.left)>50&&parseFloat(e.style.top)>50));
+    const zoomBefore=Number(await crop.getByRole('slider',{name:'头像缩放'}).inputValue());
+    await page.mouse.wheel(0,-100);await page.waitForTimeout(100);
+    assert(Number(await crop.getByRole('slider',{name:'头像缩放'}).inputValue())>zoomBefore);
+    assert(await crop.locator('.avatar-crop-circle').evaluate(e=>{const r=e.getBoundingClientRect();return r.width===r.height&&getComputedStyle(e).borderRadius==='50%'}));
+    const geometry=await crop.evaluate(e=>{
+      const r=e.getBoundingClientRect();return{inside:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,overflow:e.scrollWidth>e.clientWidth+1};
+    });assert(geometry.inside&&!geometry.overflow);
+    await page.screenshot({path:path.join(os.tmpdir(),`ero-profile-crop-${width}-${theme}.png`)});
+    await crop.getByRole('button',{name:'确定',exact:true}).click();await crop.waitFor({state:'detached'});
+    const result=await editor.locator('.profile-editor-avatar img').evaluate(async e=>{
+      await e.decode();const c=document.createElement('canvas');c.width=c.height=512;const x=c.getContext('2d');x.drawImage(e,0,0);
+      const pixel=(a,b)=>Array.from(x.getImageData(a,b,1,1).data);
+      return{width:e.naturalWidth,height:e.naturalHeight,corner:pixel(0,0),center:pixel(256,256),edge:pixel(256,8)};
+    });
+    assert.equal(result.width,512);assert.equal(result.height,512);assert.equal(result.corner[3],0);assert.equal(result.center[3],255);assert.equal(result.edge[3],255);
+    assert.deepEqual(result.center.slice(0,3),[244,67,54],'Dragging the image right/down must move the red upper-left region to the center');
+    await picker.setInputFiles({name:'broken.png',mimeType:'image/png',buffer:Buffer.from('invalid image')});
+    await crop.getByRole('alert').waitFor();assert(await crop.getByRole('button',{name:'确定',exact:true}).isDisabled());
+    await page.keyboard.press('Escape');await crop.waitFor({state:'detached'});assert(await editor.isVisible());
+    await page.keyboard.press('Escape');await editor.waitFor({state:'detached'});
+    assert.equal(await page.locator('.settings-avatar img').count(),1);
+    await trigger.click();
+    await page.evaluate(()=>document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('navigation').showPage('page-home'));
+    await menu.waitFor({state:'detached'});
+    assert.deepEqual(errors,[]);await page.close();cases++;
+  }
+})().catch(e=>{console.error(e);process.exit(1)});

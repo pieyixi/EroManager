@@ -6,6 +6,7 @@ import type { EhLibraryDashboard, EhScanIssue, EhScanProgressEvent, EhScanResult
 import { useEhLibraryStore } from './ehLibrary';
 
 export type { EhCategoryMetric, EhLibraryDashboard, EhScanIssue, EhScanResult, EhSettings } from '../api/contracts/settings';
+const dashboardLoads = new WeakMap<object, { path: string; promise: Promise<boolean> }>();
 
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 function displayWindowsPath(path: string): string {
@@ -31,10 +32,12 @@ export const useEhSettingsStore = defineStore('ehSettings', {
     ehLibraryMessage: null as UiMessage | null, ehScanning: false, ehScanCompleted: false,
     ehScanErrors: [] as EhScanIssue[], ehProgressActive: false, ehProgressPercent: 0, ehProgressText: '',
     ehDashboard: { total_count: 0, total_pages: 0, total_bytes: 0, categories: [] } as EhLibraryDashboard,
+    dashboardLoaded: false, dashboardLoading: false, dashboardError: '',
   }),
   getters: { connected: (state) => Boolean(state.ehLibraryPath.trim()) },
   actions: {
     applySettings(settings: EhSettings): void {
+      if (settings.root_path && displayWindowsPath(settings.root_path) !== this.ehLibraryPath) this.dashboardLoaded = false;
       if (settings.root_path) this.ehLibraryPath = displayWindowsPath(settings.root_path);
       this.ehMemberId = settings.ipb_member_id || '';
       this.ehPassHash = settings.ipb_pass_hash || '';
@@ -44,9 +47,32 @@ export const useEhSettingsStore = defineStore('ehSettings', {
       try { this.applySettings(await settingsApi.getEhSettings()); }
       catch (error) { this.ehCredentialsMessage = { kind: 'err', text: `读取 Eh 设置失败：${errorText(error)}` }; }
     },
-    async loadDashboard(): Promise<void> {
-      try { this.ehDashboard = await settingsApi.getEhDashboard(); }
-      catch (error) { this.ehLibraryMessage = { kind: 'err', text: `读取 Eh 概览失败：${errorText(error)}` }; }
+    async loadDashboard(fresh = false): Promise<boolean> {
+      const path = this.ehLibraryPath;
+      const pending = dashboardLoads.get(this);
+      if (pending?.path === path) {
+        if (!fresh) return pending.promise;
+        await pending.promise;
+      }
+      this.dashboardLoading = true; this.dashboardError = '';
+      const promise = (async () => {
+        try {
+          const result = await settingsApi.getEhDashboard();
+          if (path !== this.ehLibraryPath) return false;
+          this.ehDashboard = result; this.dashboardLoaded = true;
+          if (this.ehLibraryMessage?.text.startsWith('读取 Eh 概览失败：')) this.ehLibraryMessage = null;
+          return true;
+        } catch (error) {
+          if (path === this.ehLibraryPath) {
+            this.dashboardError = `读取本子统计失败：${errorText(error)}`;
+            this.ehLibraryMessage = { kind: 'err', text: `读取 Eh 概览失败：${errorText(error)}` };
+          }
+          return false;
+        }
+      })();
+      dashboardLoads.set(this, { path, promise });
+      try { return await promise; }
+      finally { if (dashboardLoads.get(this)?.promise === promise) { dashboardLoads.delete(this); this.dashboardLoading = false; } }
     },
     async saveSettings(): Promise<void> {
       if (this.ehCredentialsSaving) return;
@@ -64,12 +90,13 @@ export const useEhSettingsStore = defineStore('ehSettings', {
     async bindLibrary(): Promise<void> {
       const selected = await pickDirectory(this.ehLibraryPath.trim());
       if (!selected) return;
+      this.dashboardLoaded = false;
       this.ehLibraryPath = selected;
       try {
         this.applySettings(await settingsApi.bindEhLibrary(selected));
         this.ehLibraryMessage = null;
         await useEhLibraryStore().load();
-        await this.loadDashboard();
+        await this.loadDashboard(true);
       } catch (error) { this.ehLibraryMessage = { kind: 'err', text: `连接失败：${errorText(error)}` }; }
     },
     async scanLibrary(): Promise<void> {
@@ -85,7 +112,7 @@ export const useEhSettingsStore = defineStore('ehSettings', {
           this.ehProgressText = progress.text;
         });
         const result: EhScanResult = await settingsApi.scanEhLibrary(rootPath);
-        await Promise.all([useEhLibraryStore().load(), this.loadDashboard()]);
+        await Promise.all([useEhLibraryStore().load(), this.loadDashboard(true)]);
         this.ehScanCompleted = true; this.ehScanErrors = result.errors;
         const detail = `扫描 ${result.folders} 部，索引 ${result.indexed} 部；新建 Meta ${result.created_meta} 个、封面 ${result.created_cover} 张`;
         this.ehLibraryMessage = result.errors.length ? { kind: 'err', text: `${detail}；${summarizeScanErrors(result.errors)}` } : { kind: 'success', text: detail };

@@ -7,6 +7,7 @@ export interface PlayerCommandApi {
   openPlayer(episodeId: number): Promise<void>;
   openPlayerWithEpisode(episode: PlayerEpisode, title: string, mode?: PlayerMode): Promise<void>;
   returnFromPlayer(): Promise<void>;
+  saveProgress(): void;
   togglePlay(): Promise<void>;
   setSpeed(value: number): Promise<void>;
   playEpisodeById(episodeId: number): Promise<void>;
@@ -56,6 +57,7 @@ export const playerCommands: PlayerCommandApi = {
   openPlayer: (episodeId) => commands().openPlayer(episodeId),
   openPlayerWithEpisode: (episode, title, mode) => commands().openPlayerWithEpisode(episode, title, mode),
   returnFromPlayer: () => commands().returnFromPlayer(),
+  saveProgress: () => commands().saveProgress(),
   togglePlay: () => commands().togglePlay(),
   setSpeed: (value) => commands().setSpeed(value),
   playEpisodeById: (episodeId) => commands().playEpisodeById(episodeId),

@@ -27,9 +27,9 @@ const { chromium } = createRequire(path.join(__dirname, '../package.json'))('pla
         const labels = await sidebar.locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
         assert.equal(labels.at(-2), '下载');
         assert.equal(labels.at(-1), '设置');
-        await page.getByRole('button', { name: '下载', exact: true }).click();
+        await page.locator('.sidebar-secondary').getByRole('button', { name: '下载', exact: true }).click();
         await page.waitForFunction(() => document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('navigation').activePage === 'page-eh-download');
-        assert(await page.getByRole('button', { name: '下载', exact: true }).evaluate(button => button.classList.contains('active')));
+        assert(await page.locator('.sidebar-secondary').getByRole('button', { name: '下载', exact: true }).evaluate(button => button.classList.contains('active')));
         assert.equal(await page.getByRole('button', { name: '设置', exact: true }).evaluate(button => button.classList.contains('active')), false);
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight));
         await page.getByRole('button', { name: '首页', exact: true }).click();
@@ -42,44 +42,43 @@ const { chromium } = createRequire(path.join(__dirname, '../package.json'))('pla
     for (const [label, origin] of [['首页', 'page-home'], ['里番', 'page-media-library'], ['本子', 'page-eh-library'], ['设置', 'page-settings'], ['未建档', 'page-unarchived']]) {
       await page.getByRole('button', { name: label, exact: true }).click();
       await page.waitForFunction(origin => document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('navigation').activePage === origin, origin);
-      await page.getByRole('button', { name: '下载', exact: true }).click();
-      await page.getByRole('button', { name: '下载', exact: true }).click();
+      await page.locator('.sidebar-secondary').getByRole('button', { name: '下载', exact: true }).click();
+      await page.locator('.sidebar-secondary').getByRole('button', { name: '下载', exact: true }).click();
       await page.getByRole('button', { name: '返回', exact: true }).click();
-      assert.equal(await page.evaluate(() => document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('navigation').activePage), origin);
-      console.log(`PASS sidebar downloads return to ${origin}, including repeated clicks`);
+      assert.equal(await page.evaluate(() => document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('navigation').activePage), 'page-home');
+      console.log(`PASS sidebar downloads entered from ${origin} return home, including repeated clicks`);
     }
     await page.getByRole('button', { name: '设置', exact: true }).click();
-    await page.getByRole('button', { name: '作品下载', exact: true }).click();
+    assert.equal(await page.locator('#page-settings').getByRole('button', { name: /^(作品下载|打开下载)$/ }).count(), 0);
+    await page.locator('.sidebar-secondary').getByRole('button', { name: '下载', exact: true }).click();
     await page.getByRole('button', { name: '返回', exact: true }).click();
-    assert.equal(await page.evaluate(() => document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('navigation').activePage), 'page-settings');
-    console.log('PASS Settings download trigger retains Settings return');
+    assert.equal(await page.evaluate(() => document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('navigation').activePage), 'page-home');
+    console.log('PASS Settings has no duplicate download trigger; sidebar returns home');
     await page.evaluate(async () => {
       const stores = document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s;
       const library = stores.get('library');
       await library.showDetail(library.works[0].id, 'page-home');
     });
     const detailBefore = await page.evaluate(() => document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('library').currentDetailWorkId);
-    await page.getByRole('button', { name: '下载', exact: true }).click();
+    await page.locator('.sidebar-secondary').getByRole('button', { name: '下载', exact: true }).click();
     await page.getByRole('button', { name: '返回', exact: true }).click();
     assert.deepEqual(await page.evaluate(() => {
       const stores = document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s;
       return { page: stores.get('navigation').activePage, back: stores.get('navigation').backPage, id: stores.get('library').currentDetailWorkId };
-    }), { page: 'page-detail', back: 'page-home', id: detailBefore });
-    await page.getByRole('button', { name: '返回', exact: true }).click();
-    assert.equal(await page.evaluate(() => document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s.get('navigation').activePage), 'page-home');
-    console.log('PASS detail → downloads → same detail → original home');
+    }), { page: 'page-home', back: 'page-home', id: detailBefore });
+    console.log('PASS detail → downloads → home; detail record retained');
     const bookId = await page.evaluate(() => {
       const stores = document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s;
       const books = stores.get('ehLibrary');
       books.showDetail(books.galleries[0], 'page-home');
       return books.currentGallery.gid;
     });
-    await page.getByRole('button', { name: '下载', exact: true }).click();
+    await page.locator('.sidebar-secondary').getByRole('button', { name: '下载', exact: true }).click();
     await page.getByRole('button', { name: '返回', exact: true }).click();
     assert.deepEqual(await page.evaluate(() => {
       const stores = document.getElementById('app').__vue_app__.config.globalProperties.$pinia._s;
       return { page: stores.get('navigation').activePage, back: stores.get('navigation').backPage, id: stores.get('ehLibrary').currentGallery.gid };
-    }), { page: 'page-detail', back: 'page-home', id: bookId });
-    console.log('PASS book detail survives download round trip without changing its work or return chain');
+    }), { page: 'page-home', back: 'page-home', id: bookId });
+    console.log('PASS book detail → downloads → home; detail record retained');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });

@@ -1,0 +1,106 @@
+<script setup lang="ts">
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useLibraryStore } from '../../stores/library';
+import { useEhLibraryStore } from '../../stores/ehLibrary';
+import { useEhDownloadStore } from '../../stores/ehDownload';
+import { useNavigationStore } from '../../stores/navigation';
+import { useLibraryConsoleStore } from '../../stores/libraryConsole';
+
+const navigation = useNavigationStore();
+const library = useLibraryStore();
+const ehLibrary = useEhLibraryStore();
+const ehDownload = useEhDownloadStore();
+const settings = useLibraryConsoleStore();
+const menuElement = ref<HTMLElement | null>(null);
+
+watch(() => navigation.contextMenu.visible, async (visible) => {
+  if (!visible) return;
+  await nextTick();
+  const menu = menuElement.value;
+  if (!menu) return;
+  const bounds = menu.getBoundingClientRect();
+  navigation.placeContextMenu(
+    Math.max(6, Math.min(navigation.contextMenu.x, window.innerWidth - bounds.width - 6)),
+    Math.max(6, Math.min(navigation.contextMenu.y, window.innerHeight - bounds.height - 6)),
+  );
+});
+
+async function refreshLibrary(): Promise<void> {
+  navigation.closeContextMenu();
+  await library.refreshHome({ clearCoverCache: true });
+}
+
+async function deleteWork(): Promise<void> {
+  const workId = navigation.contextMenu.workId;
+  navigation.closeContextMenu();
+  if (workId) await library.deleteWork(workId);
+}
+
+async function deleteEhGallery(deleteFolder: boolean): Promise<void> {
+  const gid = navigation.contextMenu.workId;
+  navigation.closeContextMenu();
+  if (gid) await ehLibrary.deleteGallery(gid, deleteFolder);
+}
+
+async function refreshEhLibrary(): Promise<void> {
+  navigation.closeContextMenu();
+  await ehLibrary.refreshHome();
+}
+
+async function deleteEhHistory(deleteFolder: boolean): Promise<void> {
+  const gid = navigation.contextMenu.workId;
+  navigation.closeContextMenu();
+  if (gid) await ehDownload.deleteHistory(gid, deleteFolder);
+}
+
+function handleDocumentPointer(event: MouseEvent): void {
+  if (!navigation.contextMenu.visible) return;
+  if (!menuElement.value?.contains(event.target as Node)) navigation.closeContextMenu();
+}
+
+function handleEscape(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return;
+  library.closeDropdown();
+  navigation.closeTransientUi();
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleDocumentPointer);
+  document.addEventListener('keydown', handleEscape);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleDocumentPointer);
+  document.removeEventListener('keydown', handleEscape);
+});
+</script>
+
+<template>
+  <div v-if="settings.backupRunning" class="global-busy-mask" aria-live="polite" aria-busy="true" @contextmenu.prevent>
+    <div class="global-busy-panel">
+      <div class="global-busy-heading"><strong>正在备份资料包</strong><span>{{ settings.progressPercent }}%</span></div>
+      <div class="console-progress-track global-busy-progress"><span :style="{ width: `${settings.progressPercent}%` }"></span></div>
+      <div class="global-busy-text">{{ settings.progressText }}</div>
+      <div class="global-busy-note">备份完成前请保持软件运行</div>
+    </div>
+  </div>
+  <div class="modal-mask" :class="{ active: navigation.confirmation.visible }" id="confirmModal" @click.self="navigation.resolveConfirm(false)">
+    <div class="modal">
+      <div class="modal-title" id="confirmTitle">{{ navigation.confirmation.title || '确认操作' }}</div>
+      <div class="modal-copy" id="confirmBody">{{ navigation.confirmation.body }}</div>
+      <div class="modal-actions">
+        <button class="btn-secondary" @click="navigation.resolveConfirm(false)">取消</button>
+        <button class="btn-secondary" :class="{ 'btn-danger': navigation.confirmation.destructive }" data-confirm-action @click="navigation.resolveConfirm(true)">{{ navigation.confirmation.actionText }}</button>
+      </div>
+    </div>
+  </div>
+  <div ref="menuElement" class="context-menu" :class="{ active: navigation.contextMenu.visible }" id="workContextMenu" :style="{ left: `${navigation.contextMenu.x}px`, top: `${navigation.contextMenu.y}px` }">
+    <button v-if="navigation.contextMenu.mode === 'home'" class="context-item" id="ctxRefreshHome" @click="refreshLibrary">刷新主库</button>
+    <button v-if="navigation.contextMenu.mode === 'eh-home'" class="context-item" id="ctxRefreshEh" @click="refreshEhLibrary">刷新 本子库</button>
+    <button v-if="navigation.contextMenu.mode === 'work'" class="context-item danger" id="ctxDeleteWork" @click="deleteWork">删除作品</button>
+    <button v-if="navigation.contextMenu.mode === 'eh-work'" class="context-item" @click="deleteEhGallery(false)">仅删除数据库</button>
+    <button v-if="navigation.contextMenu.mode === 'eh-work'" class="context-item danger" @click="deleteEhGallery(true)">删除本地文件</button>
+    <button v-if="navigation.contextMenu.mode === 'eh-history'" class="context-item" @click="deleteEhHistory(false)">仅删除数据库</button>
+    <button v-if="navigation.contextMenu.mode === 'eh-history'" class="context-item danger" @click="deleteEhHistory(true)">删除本地文件</button>
+  </div>
+</template>

@@ -1,4 +1,4 @@
-use crate::paths::portable_app_dir;
+use crate::paths::portable_database_path;
 use crate::shared::*;
 use std::sync::Mutex;
 
@@ -6,23 +6,9 @@ pub struct Database {
     pub conn: Mutex<Connection>,
 }
 
-fn legacy_app_data_dir() -> std::path::PathBuf {
-    let app_data = std::env::var("APPDATA")
-        .or_else(|_| std::env::var("LOCALAPPDATA"))
-        .unwrap_or_else(|_| ".".to_string());
-    std::path::Path::new(&app_data).join("HAnimeManager")
-}
-
 fn get_db_path() -> String {
-    let dir = portable_app_dir();
-    std::fs::create_dir_all(&dir).ok();
-    let portable_db = dir.join("database.db");
-    if !portable_db.exists() {
-        let legacy_db = legacy_app_data_dir().join("database.db");
-        if legacy_db.exists() {
-            let _ = std::fs::copy(&legacy_db, &portable_db);
-        }
-    }
+    let portable_db = portable_database_path("database.db")
+        .expect("Failed to resolve portable database directory");
     portable_db.to_string_lossy().to_string()
 }
 

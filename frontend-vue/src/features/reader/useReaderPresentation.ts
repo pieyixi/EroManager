@@ -105,6 +105,7 @@ export function useReaderPresentation() {
       }));
       if (!current()) return;
       shown.value = frame;
+      reader.markPresented(Math.min(...frame.pages.map(page => page.index)));
       pending.value = undefined;
       reader.error = '';
       await nextTick();

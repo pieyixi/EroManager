@@ -1,6 +1,7 @@
+import { paginationItems } from '../components/shared/pagination';
 import { describe, expect, it } from 'vitest';
 import type { WorkSummary } from '../api/contracts/library';
-import { calculateCoverGridLayout, coverPathsForWorks, filterWorks, paginationItems, worksForPage } from './library';
+import { calculateCoverGridLayout, coverPathsForWorks, filterWorks, worksForPage } from './library';
 
 const works: WorkSummary[] = [
   {
@@ -72,7 +73,10 @@ describe('library pagination', () => {
   });
 
   it('keeps nearby pages and a compact gap marker', () => {
-    expect(paginationItems(5, 10)).toEqual([1, 'ellipsis', 3, 4, 5, 6, 7, 10]);
+    expect(paginationItems(3, 10)).toEqual([1, 2, 3, 4, 5, 'ellipsis', 10]);
+    expect(paginationItems(8, 10)).toEqual([1, 'ellipsis', 6, 7, 8, 9, 10]);
+    expect(paginationItems(1, 1)).toEqual([1]);
+    expect(paginationItems(5, 10)).toEqual([1, 'ellipsis', 3, 4, 5, 6, 7, 'ellipsis', 10]);
   });
 
   it('requests covers only for the supplied visible works and removes duplicates', () => {

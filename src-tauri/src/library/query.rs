@@ -339,7 +339,7 @@ mod imported_work_visibility_tests {
     #[test]
     fn ignores_extra_unimported_videos_when_existing_assets_are_present() {
         let root = std::env::temp_dir().join(format!(
-            "hanime-manager-visible-{}-{}",
+            "ero-manager-visible-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

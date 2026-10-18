@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
+import { inspectDependencies } from './architecture-dependencies.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const sourceRoot = resolve(root, 'src');
@@ -43,7 +44,11 @@ function countMatches(source, patterns) {
   return patterns.reduce((total, pattern) => total + [...source.matchAll(pattern)].length, 0);
 }
 
-const rows = sourceFiles(sourceRoot).map((path) => {
+const files = sourceFiles(sourceRoot);
+const dependencies = inspectDependencies(sourceRoot, files);
+if (dependencies.failures.length && enforce) throw new Error(dependencies.failures.join('\n'));
+console.log(`Dependency ownership: ${dependencies.edges.length} local imports, ${dependencies.failures.length} violations.`);
+const rows = files.map((path) => {
   const source = readFileSync(path, 'utf8');
   const metrics = Object.fromEntries(Object.entries(metricPatterns).map(([name, patterns]) => [name, countMatches(source, patterns)]));
   const file = relative(root, path).replaceAll('\\', '/');

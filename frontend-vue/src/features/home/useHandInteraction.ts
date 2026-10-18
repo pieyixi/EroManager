@@ -65,7 +65,10 @@ export function useHandInteraction(options: {
     if (virtual === null || options.disabled() || lifted.value) return;
     if (!options.expanded.value) { expandAt(virtual); return; }
     if (!carousel.moving.value && Math.abs(virtual - carousel.position.value) < .01) {
-      const card = hand.cards[wrapHandIndex(virtual, hand.cards.length)];
+      // 点击可打断接近终点的轮播；必须先补交选中记录，否则画面已换牌、current 却仍是旧牌。
+      carousel.seek(virtual);
+      hand.select(wrapHandIndex(virtual, hand.cards.length));
+      const card = hand.current;
       if (card) options.open(card);
     } else settle(virtual);
   }

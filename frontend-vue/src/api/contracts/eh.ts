@@ -45,11 +45,13 @@ export interface EhDownloadInput {
   gid: number;
   token: string;
   pageIndices?: number[];
+  parallelImages?: number;
 }
 
 export interface HitomiDownloadInput {
   id: number;
   pageIndices?: number[];
+  parallelImages?: number;
 }
 
 export interface EhDownloadFailure {

@@ -9,6 +9,7 @@ import { drawBusy, useHomeStore } from './home';
 import { useLibraryStore } from './library';
 import { useEhLibraryStore } from './ehLibrary';
 import { useNavigationStore } from './navigation';
+import { useHomeHandStore } from './homeHand';
 
 vi.mock('../api/commands/library', () => ({ libraryApi: { getWorkDetail: vi.fn() } }));
 vi.mock('../api/commands/eh', () => ({ ehApi: { getPages: vi.fn() } }));
@@ -39,6 +40,81 @@ beforeEach(() => {
 });
 
 describe('independent home draws', () => {
+  it.each(['media', 'book'] as const)('refills only the collected %s lane without retiring the transferred card', async source => {
+    useLibraryStore().works = [work(1), work(2)];
+    useEhLibraryStore().galleries = [gallery(1), gallery(-1)];
+    const home = useHomeStore();
+    await home.draw('media'); settle('media');
+    await home.draw('book'); settle('book');
+    const other = source === 'media' ? 'book' : 'media';
+    const untouched = home[other].current;
+    const previous = home[source].current!;
+    useHomeHandStore().add(source, previous);
+    let ready!: () => void;
+    const prepare = vi.fn(() => new Promise<void>(resolve => { ready = resolve; }));
+    const pending = home.refillAfterTransfer(source, previous.id, prepare);
+    expect(home[source].current).toBeNull();
+    expect(home[source].retiring).toBeNull();
+    expect(home[source].phase).toBe('waiting');
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+    home.finishAnimation(source, 'closing');
+    home.finishAnimation(source, 'tucking');
+    expect(home[source].phase).toBe('waiting');
+    ready(); await pending;
+    expect(home[source].current?.id).not.toBe(previous.id);
+    expect(home[source].phase).toBe('opening');
+    expect(home[source].retiring).toBeNull();
+    expect(home[other].current).toBe(untouched);
+    expect(home[other].phase).toBe('idle');
+    expect(useHomeHandStore().current?.id).toBe(previous.id);
+    settle(source);
+    expect(home[source].phase).toBe('idle');
+  });
+
+  it('keeps a collected card in hand if refill fails, without returning it to the top', async () => {
+    useLibraryStore().works = [work(1), work(2)];
+    const home = useHomeStore();
+    await home.draw('media'); settle('media');
+    const previous = home.media.current!;
+    useHomeHandStore().add('media', previous);
+    vi.mocked(libraryApi.getWorkDetail).mockRejectedValueOnce(new Error('offline'));
+    await home.refillAfterTransfer('media', previous.id);
+    expect(home.media.current).toBeNull();
+    expect(home.media.phase).toBe('idle');
+    expect(home.media.error).toContain('offline');
+    expect(useHomeHandStore().current?.id).toBe(previous.id);
+    expect(home.media.pool.seen).toEqual([previous.id]);
+  });
+
+  it('discards a cancelled refill without consuming its draw or restoring the transferred card', async () => {
+    useEhLibraryStore().galleries = [gallery(1), gallery(-1)];
+    const home = useHomeStore();
+    await home.draw('book'); settle('book');
+    const previous = home.book.current!;
+    let ready!: () => void;
+    const prepare = vi.fn(() => new Promise<void>(resolve => { ready = resolve; }));
+    const pending = home.refillAfterTransfer('book', previous.id, prepare);
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+    home.cancelDraws(); ready(); await pending;
+    expect(home.book.current).toBeNull();
+    expect(home.book.retiring).toBeNull();
+    expect(home.book.phase).toBe('idle');
+    expect(home.book.pool.seen).toEqual([previous.id]);
+  });
+
+  it('ignores stale transfer IDs and permits a one-work library to refill', async () => {
+    useLibraryStore().works = [work(1)];
+    const home = useHomeStore();
+    await home.draw('media'); settle('media');
+    const previous = home.media.current;
+    await home.refillAfterTransfer('media', 999);
+    expect(home.media.current).toBe(previous);
+    expect(home.media.phase).toBe('idle');
+    await home.refillAfterTransfer('media', 1);
+    expect(home.media.current?.id).toBe(1);
+    expect(home.media.phase).toBe('opening');
+    expect(home.media.retiring).toBeNull();
+  });
   it('commits independent pools only on reveal and does not consume failed or cancelled requests', async () => {
     useLibraryStore().works = [work(1), work(2), work(3)];
     useEhLibraryStore().galleries = [gallery(1), gallery(-1)];

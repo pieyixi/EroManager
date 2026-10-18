@@ -1,6 +1,9 @@
 use crate::library::database::Database;
-use crate::shared::{params, State};
+#[cfg(test)]
+use crate::shared::params;
+use crate::shared::State;
 
+#[cfg(test)]
 fn read_favorite_characters(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
     let mut statement = conn
         .prepare(
@@ -15,6 +18,7 @@ fn read_favorite_characters(conn: &rusqlite::Connection) -> Result<Vec<String>, 
     Ok(favorites)
 }
 
+#[cfg(test)]
 fn write_character_favorite(
     conn: &rusqlite::Connection,
     character_name: &str,
@@ -40,19 +44,37 @@ fn write_character_favorite(
 }
 
 #[tauri::command]
-pub fn get_favorite_characters(db: State<Database>) -> Result<Vec<String>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    read_favorite_characters(&conn)
+pub fn get_favorite_characters(
+    scope: String,
+    db: State<Database>,
+    session: State<crate::accounts::Session>,
+) -> Result<Vec<String>, String> {
+    let key = match session.authorize(&scope) {
+        Ok(key) => key,
+        Err(_) => return Ok(vec![]),
+    };
+    crate::accounts::personal_favorites(
+        &*db.conn.lock().map_err(|e| e.to_string())?,
+        key,
+        "favorite-media",
+    )
 }
-
 #[tauri::command]
 pub fn set_character_favorite(
+    scope: String,
     character_name: String,
     favorite: bool,
     db: State<Database>,
+    session: State<crate::accounts::Session>,
 ) -> Result<Vec<String>, String> {
+    let key = session.authorize(&scope)?;
+    let name = character_name.trim();
+    if name.is_empty() || name.len() > 512 {
+        return Err("角色名无效".into());
+    }
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    write_character_favorite(&conn, &character_name, favorite)
+    crate::accounts::set_personal_favorite(&conn, key, "favorite-media", name, favorite)?;
+    crate::accounts::personal_favorites(&conn, key, "favorite-media")
 }
 
 #[cfg(test)]

@@ -22,7 +22,6 @@ use tauri::Emitter;
 // A corruption guard, not an assumed Eh listing-page size.
 const MAX_GALLERY_PAGES: usize = 100_000;
 const MAX_METADATA_ATTEMPTS: usize = 3;
-const MAX_PARALLEL_DOWNLOADS: usize = 3;
 
 fn metadata_error_is_retryable(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
@@ -136,6 +135,7 @@ fn download_gallery(
     app: tauri::AppHandle,
     input: EhDownloadInput,
 ) -> Result<EhDownloadResult, String> {
+    let parallel_images = crate::settings::download_parallelism(input.parallel_images)?;
     if input.gid <= 0 {
         return Err("GID 必须是正整数".to_string());
     }
@@ -166,7 +166,7 @@ fn download_gallery(
     let mut failures = Vec::new();
     let mut downloaded_pages = 0;
     let mut completed_pages = 0;
-    for chunk in pages.chunks(MAX_PARALLEL_DOWNLOADS) {
+    for chunk in pages.chunks(parallel_images) {
         let mut jobs = Vec::with_capacity(chunk.len());
         for page in chunk.iter().copied() {
             emit_progress(

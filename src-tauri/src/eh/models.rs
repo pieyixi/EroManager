@@ -25,6 +25,8 @@ pub struct EhDownloadInput {
     pub token: String,
     #[serde(default)]
     pub page_indices: Option<Vec<usize>>,
+    #[serde(default)]
+    pub parallel_images: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]

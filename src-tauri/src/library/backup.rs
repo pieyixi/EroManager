@@ -1,6 +1,6 @@
 use crate::library::database::Database;
 use crate::library::models::is_video_file;
-use crate::paths::portable_app_dir;
+use crate::paths::{portable_app_dir, portable_database_path};
 use crate::shared::*;
 
 #[tauri::command]
@@ -13,7 +13,7 @@ pub fn backup_database(backup_path: String, db: State<Database>) -> Result<(), S
 
 #[tauri::command]
 pub fn restore_database(restore_path: String) -> Result<(), String> {
-    let db_file = portable_app_dir().join("database.db");
+    let db_file = portable_database_path("database.db").map_err(|error| error.to_string())?;
     std::fs::copy(&restore_path, &db_file).map_err(|e| format!("恢复失败: {}", e))?;
     Ok(())
 }
@@ -33,7 +33,7 @@ mod zip_filename_tests {
     #[test]
     fn marks_local_and_central_names_as_utf8() {
         let root = std::env::temp_dir().join(format!(
-            "hanime-manager-utf8-zip-{}-{}",
+            "ero-manager-utf8-zip-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -76,7 +76,7 @@ mod zip_filename_tests {
     #[test]
     fn streams_files_with_progress_and_preserves_an_existing_backup_on_failure() {
         let root = std::env::temp_dir().join(format!(
-            "hanime-manager-streaming-zip-{}-{}",
+            "ero-manager-streaming-zip-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -357,7 +357,10 @@ pub async fn backup_data_package(
         };
 
         emit_backup_progress(&app, 4, "正在生成数据库快照");
-        let temp_db = portable_app_dir().join("temp").join("backup-database.db");
+        let temp_db = portable_app_dir()
+            .join("db")
+            .join("temp")
+            .join("backup-database.db");
         if let Some(parent) = temp_db.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }

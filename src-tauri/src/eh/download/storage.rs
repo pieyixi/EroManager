@@ -172,8 +172,7 @@ mod tests {
     }
     #[test]
     fn recognizes_only_a_matching_owned_folder() {
-        let temp =
-            std::env::temp_dir().join(format!("hanime-manager-marker-{}", std::process::id()));
+        let temp = std::env::temp_dir().join(format!("ero-manager-marker-{}", std::process::id()));
         std::fs::create_dir_all(&temp).unwrap();
         std::fs::write(temp.join(".ehviewer"), "VERSION 1\n\n123\nabc-token\n").unwrap();
         assert!(source_marker_matches(&temp, 123, "abc-token"));

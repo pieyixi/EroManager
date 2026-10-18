@@ -1,4 +1,5 @@
-import { isTauriConnected } from "../api/tauri";
+import { isTauriConnected, listenTauri } from "../api/tauri";
+import { requestClose, requestExit } from '../features/shell/closeController';
 import { playerCommands } from "../features/player/commands";
 import type { useLibraryStore } from "../stores/library";
 import { useNavigationStore } from "../stores/navigation";
@@ -6,6 +7,10 @@ import { usePlayerStore } from "../stores/player";
 import { useLibraryConsoleStore } from "../stores/libraryConsole";
 import { useEhLibraryStore } from "../stores/ehLibrary";
 import { useEhReaderStore } from "../stores/ehReader";
+import { usePreferencesStore } from "../stores/preferences";
+import { useAccountsStore } from "../stores/accounts";
+import { useHomeStore } from "../stores/home";
+import type { StartupScreenHooks } from '../features/shell/useStartupScreen';
 
 type LibraryStore = ReturnType<typeof useLibraryStore>;
 
@@ -20,11 +25,17 @@ function isTypingTarget(target: EventTarget | null): boolean {
   );
 }
 
-export function installApplicationEvents(library: LibraryStore): () => void {
+export function installApplicationEvents(library: LibraryStore, startup: StartupScreenHooks): () => void {
   const navigation = useNavigationStore();
   const player = usePlayerStore();
   const settings = useLibraryConsoleStore();
   const cleanups: Array<() => void> = [];
+  let disposed = false;
+  for (const [event, handler] of [['app-close-requested', requestClose], ['app-exit-requested', requestExit]] as const) {
+    void listenTauri(event, () => { void handler(); }).then(stop => {
+      if (disposed) stop(); else cleanups.push(stop);
+    }).catch(() => undefined);
+  }
 
   function listen<K extends keyof WindowEventMap>(
     target: Window,
@@ -88,7 +99,7 @@ export function installApplicationEvents(library: LibraryStore): () => void {
   }
 
   listenDocument("keydown", (event) => {
-    handlePlayerKeydown(event);
+    if (!useAccountsStore().locked && !useAccountsStore().selecting) handlePlayerKeydown(event);
   });
   listenDocument("keyup", handlePlayerKeyup);
   listenDocument("contextmenu", (event) => {
@@ -121,10 +132,23 @@ export function installApplicationEvents(library: LibraryStore): () => void {
   });
 
   if (isTauriConnected()) {
+    const startupRevision = navigation.pageRevision;
     void (async () => {
+      const preferences = usePreferencesStore();
+      const accounts = useAccountsStore();
+      await accounts.initialize();
+      if (!accounts.locked) await Promise.all([accounts.loadPrivacy(), useHomeStore().restorePools()]);
+      await preferences.load();
+      if (!accounts.locked && preferences.loaded) accounts.personalKey = accounts.current?.key || 0;
       const status = await settings.initializeMediaLibrary();
-      await library.initialize();
+      await Promise.all([library.initialize({ deferCoverPrefetch: true }), useEhLibraryStore().load()]);
+      if (disposed) return;
+      await startup.prepare();
+      if (disposed) return;
       if (status.needs_binding) await settings.openSettingsPage();
+      else if (navigation.pageRevision === startupRevision) {
+        navigation.showPage(`page-${preferences.values.startup_page}`);
+      }
       const preview = import.meta.env.DEV
         ? new URLSearchParams(window.location.search).get("preview")
         : null;
@@ -145,10 +169,11 @@ export function installApplicationEvents(library: LibraryStore): () => void {
             new URLSearchParams(window.location.search).get("settings") === "1";
         }
       }
-    })();
-  } else library.showDisconnected();
+    })().catch(error => { console.error('application startup failed:', error); }).finally(startup.finish);
+  } else { library.showDisconnected(); startup.finish(); }
 
   return () => {
+    disposed = true;
     if (resizeTimer !== null) window.clearTimeout(resizeTimer);
     cleanups.reverse().forEach((cleanup) => cleanup());
   };

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useArchiveStore } from '../../stores/archive';
 import { isMissingDirectoryItem, type ConsoleItem, type LibraryScan, useLibraryConsoleStore } from '../../stores/libraryConsole';
 import { useEhSettingsStore } from '../../stores/ehSettings';
+import { useAvDownloadStore } from '../../stores/avDownload';
 import { useNavigationStore } from '../../stores/navigation';
 import SettingsLibraryStats from './SettingsLibraryStats.vue';
 import SettingRow from './SettingRow.vue';
@@ -10,13 +11,20 @@ import { pickDirectory } from '../../api/tauri';
 
 const settings = useLibraryConsoleStore();
 const eh = useEhSettingsStore();
+const av = useAvDownloadStore();
+const avPath = ref('');
+watch(() => av.root, path => { avPath.value = path; }, { immediate: true });
+async function chooseAvDirectory(): Promise<void> {
+  try { const path = await pickDirectory(avPath.value || av.root); if (path) await av.bindRoot(path); }
+  catch { av.directoryMessage = '无法选择 AV 资料目录，请重试'; av.directoryFailed = true; }
+}
 const archive = useArchiveStore();
 const navigation = useNavigationStore();
 const cookieModalVisible = ref(false);
 const statsVisible = ref(false);
 async function chooseBackupDirectory(): Promise<void> {
   try {
-    const current = settings.backupPath.trim();
+    const current = settings.backupPath.trim() || 'D:\\Ark\\backup\\ero-manager backup\\ero-data-backup.zip';
     const split = Math.max(current.lastIndexOf('\\'), current.lastIndexOf('/'));
     const directory = await pickDirectory(split >= 0 ? current.slice(0, split) : undefined);
     if (directory) settings.backupPath = `${directory.replace(/[\\/]+$/, '')}\\${split >= 0 ? current.slice(split + 1) || 'ero-data-backup.zip' : current || 'ero-data-backup.zip'}`;
@@ -78,7 +86,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', handleSettingsKeyd
 watch(
   () => navigation.activePage,
   (page) => {
-    if (page === 'page-settings') void eh.loadSettings();
+    if (page === 'page-settings') { void eh.loadSettings(); void av.loadSettings(); }
     else { activeDrawer.value = null; cookieModalVisible.value = false; statsVisible.value = false; }
   },
   { immediate: true },
@@ -94,7 +102,7 @@ watch(
       <div class="settings-library-state"><i class="settings-scan-dot" :class="{ scanning: settings.scanning }" aria-hidden="true"></i><span id="libraryMsg" :title="settings.scanning ? mediaStatus : settings.libraryMessage?.text || mediaStatus">{{ settings.scanning ? mediaStatus : settings.libraryMessage?.text || mediaStatus }}</span><button v-if="mediaIssueCount || settings.libraryMessage?.kind === 'err'" class="settings-scan-details" @click="openDrawer('media')">{{ mediaIssueCount ? `查看结果（${mediaIssueCount}）` : '查看详情' }}</button><button id="consoleScanButton" class="btn-primary settings-scan-button" :disabled="settings.busy" @click="settings.scanLibraryChanges">{{ settings.scanning ? '扫描中' : '扫描变化' }}</button></div>
       <div class="settings-reserved-progress" id="consoleProgress" :class="{ active: settings.progressActive }" :aria-hidden="!settings.progressActive"><div class="compact-progress-track" role="progressbar" aria-label="里番扫描进度" :aria-valuenow="settings.progressPercent" aria-valuemin="0" aria-valuemax="100"><span id="consoleProgressBar" :style="{ width: `${settings.progressPercent}%` }"></span></div><span id="consoleProgressText">{{ settings.progressText }}</span></div>
       <div class="settings-maintenance-strip"><button class="btn-secondary" :disabled="settings.busy" @click="settings.backupDatabase">备份数据库</button><button class="btn-secondary" :disabled="settings.busy" @click="settings.restoreDatabase">恢复数据库</button><button class="btn-secondary" :disabled="settings.busy" @click="settings.backupDataPackage">备份资料包</button><button class="btn-secondary" :disabled="settings.busy" @click="openDuplicateDrawer">重复检查</button></div>
-      <div class="settings-path-control settings-backup-control"><input spellcheck="false" autocorrect="off" autocapitalize="off" v-model="settings.backupPath" class="s-input settings-backup-input" type="text" id="dbFilePath" aria-label="备份或恢复路径" placeholder="备份或恢复路径，例如 D:\Ark\ero-data-backup.zip"><button class="btn-secondary" :disabled="settings.busy" @click="chooseBackupDirectory">更改目录</button></div>
+      <div class="settings-path-control settings-backup-control"><input spellcheck="false" autocorrect="off" autocapitalize="off" v-model="settings.backupPath" class="s-input settings-backup-input" type="text" id="dbFilePath" aria-label="备份或恢复路径" placeholder="D:\Ark\backup\ero-manager backup\ero-data-backup.zip"><button class="btn-secondary" :disabled="settings.busy" @click="chooseBackupDirectory">更改目录</button></div>
       <div id="dbMsg" class="settings-data-feedback" :title="settings.databaseMessage?.text">{{ settings.databaseMessage?.text }}</div>
     </section>
     <section class="settings-data-group" aria-label="本子数据">
@@ -102,6 +110,11 @@ watch(
       <div class="settings-path-control"><input spellcheck="false" autocorrect="off" autocapitalize="off" v-model="eh.ehLibraryPath" class="s-input" type="text" aria-label="本子库目录"><button class="btn-secondary" @click="eh.bindLibrary">更改目录</button></div>
       <div class="settings-library-state"><i class="settings-scan-dot" :class="{ scanning: eh.ehScanning }" aria-hidden="true"></i><span :title="eh.ehScanning ? ehStatus : eh.ehLibraryMessage?.text || ehStatus">{{ eh.ehScanning ? ehStatus : eh.ehLibraryMessage?.text || ehStatus }}</span><button v-if="ehIssueCount || eh.ehLibraryMessage?.kind === 'err'" class="settings-scan-details" @click="openDrawer('eh')">{{ ehIssueCount ? `查看结果（${ehIssueCount}）` : '查看详情' }}</button><button class="btn-primary settings-scan-button" :disabled="eh.ehScanning" @click="eh.scanLibrary">{{ eh.ehScanning ? '扫描中' : '扫描变化' }}</button></div>
       <div class="settings-reserved-progress" :class="{ active: eh.ehProgressActive }" :aria-hidden="!eh.ehProgressActive"><div class="compact-progress-track" role="progressbar" aria-label="本子扫描进度" :aria-valuenow="eh.ehProgressPercent" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${eh.ehProgressPercent}%` }"></span></div><span>{{ eh.ehProgressText }}</span></div>
+    </section>
+    <section class="settings-data-group" aria-label="AV 数据">
+      <header class="settings-library-heading"><h3>AV 数据</h3></header>
+      <div class="settings-path-control"><input v-model="avPath" spellcheck="false" autocorrect="off" autocapitalize="off" class="s-input" type="text" aria-label="AV 资料目录" :disabled="av.directoryLoading || av.binding || av.running" @keydown.enter.prevent="av.bindRoot(avPath)"><button class="btn-secondary" :disabled="av.directoryLoading || av.binding || av.running" @click="chooseAvDirectory">更改目录</button></div>
+      <div class="settings-library-state"><i class="settings-scan-dot" :class="{ scanning: av.binding || av.directoryLoading }" aria-hidden="true"></i><span :class="{ 'av-directory-error': av.directoryFailed }" :title="av.directoryMessage">{{ av.binding ? '正在更新目录' : av.directoryLoading ? '正在读取目录' : av.directoryMessage || (av.root ? '已连接' : '尚未设置目录') }}</span></div>
     </section>
     <SettingsLibraryStats :open="statsVisible" @close="statsVisible = false" />
     <Teleport to="body">
@@ -114,3 +127,7 @@ watch(
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.av-directory-error { color: var(--danger); }
+</style>

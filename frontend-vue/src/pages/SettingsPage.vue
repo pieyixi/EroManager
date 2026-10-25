@@ -10,6 +10,7 @@ import { usePreferencesStore } from '../stores/preferences';
 import { useNavigationStore } from '../stores/navigation';
 import { useUiStore } from '../stores/ui';
 import type { UserPreferences } from '../api/contracts/preferences';
+import { playerLoopOptions } from '../features/player/model';
 
 const preferences = usePreferencesStore();
 const navigation = useNavigationStore();
@@ -96,8 +97,8 @@ onBeforeUnmount(() => sections.clear());
               <SettingRow title="默认音量"><div class="setting-range"><input aria-label="默认音量" type="range" min="0" max="100" :value="values.player_volume" :disabled="!preferences.loaded" @input="change('player_volume', $event)"><output>{{ values.player_volume }}%</output></div></SettingRow>
               <SettingRow title="默认倍速"><SettingsSelect label="默认倍速" :model-value="values.player_speed" :options="[0.5,0.75,1,1.25,1.5,1.75,2,3,4].map(value => ({ value, label: `${value}×` }))" :disabled="!preferences.loaded" @change="value => selectPreference('player_speed', value)" /></SettingRow>
               <SettingRow title="画面适应"><SettingsSelect label="画面适应" :model-value="values.player_fit" :options="[{ value: 'contain', label: '适应窗口' }, { value: 'fill', label: '填充窗口' }, { value: 'original', label: '原始尺寸' }]" :disabled="!preferences.loaded" @change="value => selectPreference('player_fit', value)" /></SettingRow>
-              <SettingRow title="循环方式"><SettingsSelect label="循环方式" :model-value="values.player_loop" :options="[{ value: 'off', label: '不循环' }, { value: 'one', label: '单集循环' }, { value: 'all', label: '列表循环' }]" :disabled="!preferences.loaded" @change="value => selectPreference('player_loop', value)" /></SettingRow>
-              <SettingRow title="自动下一集"><input class="setting-switch" type="checkbox" role="switch" aria-label="自动下一集" :checked="values.player_auto_next" :disabled="!preferences.loaded" @change="change('player_auto_next', $event)"></SettingRow>
+              <SettingRow title="循环方式" :description="values.player_loop === 'random' ? '按集播完整部作品，再随机切换另一部，从第一集开始。' : ''"><SettingsSelect label="循环方式" :model-value="values.player_loop" :options="playerLoopOptions" :disabled="!preferences.loaded" @change="value => selectPreference('player_loop', value)" /></SettingRow>
+              <SettingRow title="自动下一集" :description="values.player_loop === 'random' ? '随机播放期间持续连播。' : ''"><input class="setting-switch" type="checkbox" role="switch" aria-label="自动下一集" :checked="values.player_auto_next || values.player_loop === 'random'" :disabled="!preferences.loaded || values.player_loop === 'random'" @change="change('player_auto_next', $event)"></SettingRow>
               <SettingRow title="记忆播放进度"><input class="setting-switch" type="checkbox" role="switch" aria-label="记忆播放进度" :checked="values.remember_playback" :disabled="!preferences.loaded" @change="change('remember_playback', $event)"></SettingRow>
             </div>
           </section>
@@ -121,7 +122,7 @@ onBeforeUnmount(() => sections.clear());
             </div>
           </section>
           <section :ref="element => bindSection('data', element)" class="settings-group" data-settings-group="data">
-            <header class="settings-group-head"><h2>数据</h2><span>两库概览、目录连接与维护</span></header>
+            <header class="settings-group-head"><h2>数据</h2><span>目录连接与维护</span></header>
             <SettingsDataPanel ref="dataPanel" />
           </section>
           <section :ref="element => bindSection('shortcuts', element)" class="settings-group" data-settings-group="shortcuts">

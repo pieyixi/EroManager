@@ -177,7 +177,8 @@ pub fn account_get_data(
     db: tauri::State<Database>,
     session: tauri::State<Session>,
 ) -> Result<Option<String>, String> {
-    let key = session.authorize(&scope)?;
+    let state = session.0.lock().map_err(|e| e.to_string())?;
+    let key = state.authorize(&scope)?;
     validate_kind(&kind, &item)?;
     storage::read_value(
         &*db.conn.lock().map_err(|e| e.to_string())?,
@@ -188,7 +189,16 @@ pub fn account_get_data(
 }
 fn validate_kind(kind: &str, item: &str) -> Result<(), String> {
     if (kind == "privacy" && item.is_empty())
-        || (kind == "draw" && ["media", "book"].contains(&item))
+        || (kind == "draw" && ["media", "book", "playback"].contains(&item))
+        || (kind == "av-playback"
+            && item.rsplit_once(':').is_some_and(|(code, variant)| {
+                !code.is_empty()
+                    && code.len() <= 32
+                    && code
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+                    && ["original", "cut"].contains(&variant)
+            }))
     {
         Ok(())
     } else {
@@ -204,7 +214,8 @@ pub fn account_set_data(
     db: tauri::State<Database>,
     session: tauri::State<Session>,
 ) -> Result<(), String> {
-    let key = session.authorize(&scope)?;
+    let state = session.0.lock().map_err(|e| e.to_string())?;
+    let key = state.authorize(&scope)?;
     validate_kind(&kind, &item)?;
     if value.len() > 8_000_000 {
         return Err("账号记录过大".into());
@@ -220,6 +231,8 @@ pub fn account_set_data(
         if data["recent"].as_array().unwrap().len() > 20 {
             return Err("最近抽卡记录过长".into());
         }
+    } else if kind == "av-playback" {
+        validate_av_position(&data)?;
     } else {
         let idle = data["idle_seconds"].as_u64().ok_or("闲置时间无效")?;
         let delay = data["background_seconds"].as_u64().ok_or("后台时间无效")?;
@@ -239,6 +252,41 @@ pub fn account_set_data(
         &item,
         &value,
     )
+}
+
+fn validate_av_position(data: &serde_json::Value) -> Result<(), String> {
+    let position = data["position"].as_f64().ok_or("播放位置无效")?;
+    if !position.is_finite() || !(0.0..=1_000_000_000.0).contains(&position) {
+        return Err("播放位置无效".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod av_progress_tests {
+    use super::*;
+    #[test]
+    fn accepts_only_bounded_version_keys_and_finite_playback_positions() {
+        for item in ["IPX-607:original", "IPX-607:cut"] {
+            assert!(validate_kind("av-playback", item).is_ok());
+        }
+        for item in [
+            "IPX-607:unknown",
+            "../IPX-607:cut",
+            ":cut",
+            "IPX-607:cut:original",
+        ] {
+            assert!(validate_kind("av-playback", item).is_err());
+        }
+        assert!(validate_av_position(&serde_json::json!({"position":1.5})).is_ok());
+        for data in [
+            serde_json::json!({"position":-1}),
+            serde_json::json!({"position":null}),
+            serde_json::json!({"position":1e20}),
+        ] {
+            assert!(validate_av_position(&data).is_err());
+        }
+    }
 }
 
 pub(crate) fn personal_favorites(

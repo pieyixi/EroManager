@@ -3,6 +3,7 @@ import { computed, provide, ref, onBeforeUnmount, onMounted } from 'vue';
 import './assets/styles.css';
 import AppShell from './components/shell/AppShell.vue';
 import ArchivePage from './pages/ArchivePage.vue';
+import AvLibraryPage from './pages/AvLibraryPage.vue';
 import DetailPage from './pages/DetailPage.vue';
 import EhLibraryPage from './pages/EhLibraryPage.vue';
 import EhDownloadPage from './pages/EhDownloadPage.vue';
@@ -47,6 +48,7 @@ onBeforeUnmount(() => {
       <HomePage />
       <MediaLibraryPage />
       <EhLibraryPage />
+      <AvLibraryPage />
       <EhDownloadPage />
       <EhReaderPage />
       <DetailPage />

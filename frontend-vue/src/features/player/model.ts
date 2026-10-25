@@ -1,5 +1,14 @@
 import type { PlayerEpisode } from '../../api/contracts/library';
-import type { PlayerFitMode } from '../../stores/player';
+import type { PlayerFitMode, PlayerLoopMode } from '../../stores/player';
+
+export const playerLoopOptions: Array<{ value: PlayerLoopMode; label: string }> = [
+  { value: 'off', label: '不循环' }, { value: 'one', label: '单集循环' },
+  { value: 'all', label: '列表循环' }, { value: 'random', label: '随机播放' },
+];
+
+export function orderedPlayerEpisodes<T extends PlayerEpisode>(episodes: readonly T[]): T[] {
+  return episodes.filter(episode => episode.video_path?.trim()).sort((a, b) => playerEpisodeNumber(a) - playerEpisodeNumber(b));
+}
 
 export const playerFitModes: Record<PlayerFitMode, { label: string; panscan: number; unscaled: boolean }> = {
   contain: { label: '完整显示', panscan: 0, unscaled: false },

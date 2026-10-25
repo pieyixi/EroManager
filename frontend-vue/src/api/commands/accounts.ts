@@ -2,7 +2,7 @@ import { invokeTauri } from '../tauri';
 import { accountScope, rememberAccountPin, trackAccountWrite } from '../accountContext';
 import type { AccountState } from '../contracts/accounts';
 const dataWrites = new Map<string, Promise<void>>();
-function setData(kind: 'privacy' | 'draw', item: string, value: string, scope = accountScope()): Promise<void> {
+function setData(kind: 'privacy' | 'draw' | 'av-playback', item: string, value: string, scope = accountScope()): Promise<void> {
   const key = `${scope}:${kind}:${item}`;
   const request = (dataWrites.get(key) || Promise.resolve()).catch(() => undefined)
     .then(() => invokeTauri<void>('account_set_data', { scope, kind, item, value }));
@@ -21,6 +21,6 @@ export const accountApi = {
     const scope = accountScope();
     return trackAccountWrite(invokeTauri<void>('account_change_pin', { scope, newPin }).then(() => rememberAccountPin(newPin, scope)));
   },
-  get: (kind: 'privacy' | 'draw', item = '', scope = accountScope()) => invokeTauri<string | null>('account_get_data', { scope, kind, item }),
+  get: (kind: 'privacy' | 'draw' | 'av-playback', item = '', scope = accountScope()) => invokeTauri<string | null>('account_get_data', { scope, kind, item }),
   set: setData,
 };

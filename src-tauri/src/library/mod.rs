@@ -8,6 +8,7 @@ pub(crate) mod archive_cover;
 pub(crate) mod archive_meta;
 pub(crate) mod backup;
 pub(crate) mod database;
+mod database_migration;
 pub(crate) mod delete;
 pub(crate) mod duplicates;
 pub(crate) mod favorites;

@@ -6,10 +6,9 @@ pub struct Database {
     pub conn: Mutex<Connection>,
 }
 
-fn get_db_path() -> String {
-    let portable_db = portable_database_path("database.db")
-        .expect("Failed to resolve portable database directory");
-    portable_db.to_string_lossy().to_string()
+fn get_db_path() -> Result<String, String> {
+    let portable_db = portable_database_path("database.db").map_err(|e| e.to_string())?;
+    Ok(portable_db.to_string_lossy().to_string())
 }
 
 pub(crate) fn parse_year_month(value: &str) -> Option<(i32, i32)> {
@@ -19,9 +18,11 @@ pub(crate) fn parse_year_month(value: &str) -> Option<(i32, i32)> {
     Some((year, month))
 }
 
-pub(crate) fn init_db() -> Database {
-    let path = get_db_path();
-    let conn = Connection::open(&path).expect("Failed to open database");
+pub(crate) fn init_db() -> Result<Database, String> {
+    let path = get_db_path()?;
+    let mut conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
 
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
         .ok();
@@ -75,7 +76,7 @@ pub(crate) fn init_db() -> Database {
             CreatedAt TEXT NOT NULL DEFAULT (datetime('now','localtime'))
         );",
     )
-    .expect("Failed to create tables");
+    .map_err(|e| e.to_string())?;
 
     // Optional search-only aliases were added after the initial portable schema.
     // SQLite has no IF NOT EXISTS form for ADD COLUMN, so an existing column is harmless here.
@@ -85,9 +86,16 @@ pub(crate) fn init_db() -> Database {
     )
     .ok();
 
-    Database {
+    super::database_migration::unify(&mut conn, &crate::paths::portable_app_dir(), || {
+        crate::paths::portable_backup_dir().map_err(|e| e.to_string())
+    })
+    .map_err(|e| format!("数据库迁移未完成，原件和备份已保留：{e}"))?;
+    crate::eh::database::initialize_eh_schema(&conn)?;
+    crate::av::initialize(&conn)?;
+
+    Ok(Database {
         conn: Mutex::new(conn),
-    }
+    })
 }
 
 // ─── Tauri Commands ───────────────────────────────────────

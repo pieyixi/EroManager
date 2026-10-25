@@ -1,4 +1,6 @@
 import { nextTick } from 'vue';
+import { accountScope } from '../../api/accountContext';
+import { useAccountsStore } from '../../stores/accounts';
 import { usePreferencesStore } from '../../stores/preferences';
 import { createPlayerPreferences, shouldAdvanceEpisode } from './preferences';
 import { archiveApi } from '../../api/commands/archive';
@@ -7,11 +9,14 @@ import type { ArchiveEpisode } from '../../api/contracts/archive';
 import type { PlayerEpisode } from '../../api/contracts/library';
 import { useArchiveStore } from '../../stores/archive';
 import { useLibraryStore } from '../../stores/library';
+import { useAvLibraryStore } from '../../stores/avLibrary';
+import { avPlayerEpisodes } from './avPlayback';
 import { useNavigationStore } from '../../stores/navigation';
 import { usePlayerStore, type PlayerFitMode, type PlayerLoopMode, type PlayerMode } from '../../stores/player';
 import { registerPlayerCommands, type PlayerCommandApi } from './commands';
 import { createPlayerLayout } from './layout';
-import { formatPlayerTime, nextPlayerEpisodeIndex, parsePlayerTime, playerFitModes, playerEpisodeNumber } from './model';
+import { formatPlayerTime, nextPlayerEpisodeIndex, parsePlayerTime, playerFitModes, playerEpisodeNumber, orderedPlayerEpisodes } from './model';
+import { playRandomWork } from './randomPlayback';
 import { delay, initLibMpv, listenMpvEvents, mpvCommand, mpvPlugin, mpvSetProperty, safeMpvGetProperty } from './mpv';
 import { createPlayerThumbnails } from './thumbnails';
 import { createPlayerSeekController } from './seek';
@@ -23,12 +28,15 @@ function errorText(error: unknown): string {
 export function installPlayerController(): () => void {
   const archive = useArchiveStore();
   const library = useLibraryStore();
+  const avLibrary = useAvLibraryStore();
   const navigation = useNavigationStore();
   const player = usePlayerStore();
   const preferences = usePreferencesStore();
+  const accounts = useAccountsStore();
   let lastHistorySave = 0;
   let openingRevision = 0;
   let endedEpisode = '';
+  let advancing = false;
   const layout = createPlayerLayout(player);
   const thumbnails = createPlayerThumbnails(player, formatPlayerTime);
   let pollTimer: number | null = null;
@@ -47,17 +55,19 @@ export function installPlayerController(): () => void {
   }
 
   function currentEpisode(): PlayerEpisode | null {
-    if (player.mode === 'archive') return player.episode;
+    if (player.mode === 'archive' || player.mode === 'av') return player.episode;
     if (!library.currentDetail || !player.episode) return null;
     return (library.currentDetail.episodes.find((episode) => Number(episode.id) === Number(player.episode?.id)) as PlayerEpisode | undefined) || player.episode;
   }
 
   function episodeList(): PlayerEpisode[] {
-    if (player.mode === 'detail') return (library.currentDetail?.episodes || []).filter((episode) => episode.video_path) as PlayerEpisode[];
-    return (archive.draft?.episode_list || []).filter((episode) => episode.video_path) as PlayerEpisode[];
+    if (player.mode === 'av') return avPlayerEpisodes(avLibrary.currentWork);
+    if (player.mode === 'detail') return orderedPlayerEpisodes(library.currentDetail?.episodes || []);
+    return orderedPlayerEpisodes(archive.draft?.episode_list || []);
   }
 
   function workTitle(): string {
+    if (player.mode === 'av') return `${avLibrary.currentWork?.code || ''} ${avLibrary.currentWork?.title || ''}`.trim();
     return player.mode === 'detail' ? library.currentDetail?.work.title || '' : archive.draft?.title || '未命名作品';
   }
 
@@ -88,10 +98,13 @@ export function installPlayerController(): () => void {
       if (Number.isFinite(Number(speed))) player.speed = Number(speed);
       if (Date.now() - lastHistorySave >= 5000) { lastHistorySave = Date.now(); playbackPreferences.save(); }
       if (!ended) endedEpisode = '';
-      if (shouldAdvanceEpisode(Boolean(ended), player.loopMode, preferences.values.player_auto_next) && !player.handlingEnd && endedEpisode !== expectedPath) {
+      if (shouldAdvanceEpisode(Boolean(ended), player.loopMode, preferences.values.player_auto_next) && !advancing && !player.videoLoading && !accounts.locked && navigation.activePage === 'page-player' && !player.handlingEnd && endedEpisode !== expectedPath) {
         endedEpisode = expectedPath || '';
         player.handlingEnd = true;
-        void playNextEpisode(false).finally(() => { player.handlingEnd = false; });
+        const owner = accountScope();
+        void playNextEpisode(false).catch(error => {
+          if (owner === accountScope() && navigation.activePage === 'page-player') message('err', `连续播放失败: ${errorText(error)}`);
+        }).finally(() => { player.handlingEnd = false; });
       }
     })();
     pollStatusPromise = request;
@@ -140,10 +153,11 @@ export function installPlayerController(): () => void {
     return frameReady;
   }
 
-  async function commitVideoReveal(): Promise<void> {
+  async function commitVideoReveal(valid = () => true): Promise<void> {
     await layout.syncBounds();
     await nextTick();
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    if (!valid()) return;
     player.nativeVisible = true;
     player.videoLoading = false;
     await nextTick();
@@ -159,9 +173,9 @@ export function installPlayerController(): () => void {
     ]);
   }
 
-  async function setLoopMode(mode: string): Promise<void> {
-    player.loopMode = (['one', 'all'].includes(mode) ? mode : 'off') as PlayerLoopMode;
-    if (preferences.values.player_loop !== player.loopMode) preferences.update({ player_loop: player.loopMode });
+  async function setLoopMode(mode: string, persist = true): Promise<void> {
+    player.loopMode = (player.mode === 'av' && mode === 'random' ? 'off' : ['one', 'all', 'random'].includes(mode) ? mode : 'off') as PlayerLoopMode;
+    if (persist && preferences.values.player_loop !== player.loopMode) preferences.update({ player_loop: player.loopMode });
     if (!player.libmpvReady) return;
     try { await mpvSetProperty('loop-file', player.loopMode === 'one' ? 'inf' : 'no'); }
     catch (error) { message('err', `循环设置失败: ${errorText(error)}`); }
@@ -189,7 +203,7 @@ export function installPlayerController(): () => void {
       speed: preferences.values.player_speed,
       volume: preferences.values.player_volume,
       fitMode: preferences.values.player_fit,
-      loopMode: preferences.values.player_loop,
+      loopMode: mode === 'av' && preferences.values.player_loop === 'random' ? 'off' : preferences.values.player_loop,
       handlingEnd: false,
       sidebarCollapsed: false,
       descriptionExpanded: false,
@@ -202,12 +216,15 @@ export function installPlayerController(): () => void {
     if (!episode?.video_path) return;
     playbackPreferences.save();
     const revision = ++openingRevision;
+    const owner = accountScope(), entryPage = navigation.activePage;
+    const valid = () => revision === openingRevision && owner === accountScope() && !accounts.locked && (navigation.activePage === entryPage || navigation.activePage === 'page-player');
     player.episode = episode;
     player.title = title;
     player.hint = '正在启动 mpv 播放窗口...';
     player.videoLoading = true;
     player.nativeVisible = false;
     resetPlaybackState(mode);
+    player.sourceKey = mode === 'av' ? avLibrary.currentWork?.code || '' : '';
     thumbnails.reset(episode.video_path);
     message('info', '正在启动 mpv 播放内核...');
     try {
@@ -216,7 +233,7 @@ export function installPlayerController(): () => void {
         await initLibMpv();
         player.libmpvReady = true;
       }
-      if (revision !== openingRevision) return;
+      if (!valid()) return;
     } catch (error) {
       player.videoLoading = false;
       player.hint = 'mpv 未启动';
@@ -231,18 +248,24 @@ export function installPlayerController(): () => void {
       await layout.syncBounds();
       const firstFrame = waitForFirstFrame(episode.video_path);
       await mpvCommand('loadfile', [episode.video_path]);
+      if (!valid()) return;
       await applyFitMode();
-      await setLoopMode(player.loopMode);
+      await setLoopMode(player.loopMode, false);
       await setVolume(player.volume);
       await mpvSetProperty('speed', player.speed);
       player.muted = Boolean(await safeMpvGetProperty<boolean>('mute', 'flag'));
       await pollStatus();
       void thumbnails.prefetch(episode.video_path, player.duration);
       if (!await firstFrame) throw new Error('视频首帧加载超时');
-      if (revision !== openingRevision) return;
+      if (!valid()) return;
+      // 首帧前的查询可能尚无时长；用首帧后的新快照恢复进度，不能按0秒时长清空记录。
+      if (pollStatusPromise) await pollStatusPromise;
+      await pollStatus();
+      if (!valid()) return;
       await playbackPreferences.resume(episode);
-      if (revision !== openingRevision) return;
-      await commitVideoReveal();
+      if (!valid()) return;
+      await commitVideoReveal(valid);
+      if (!valid()) return;
       layout.scheduleSync();
       player.hint = '';
       message();
@@ -298,6 +321,7 @@ export function installPlayerController(): () => void {
       isSeeking: false,
       pendingSeek: null,
       mode: 'detail',
+      sourceKey: '',
       hint: 'mpv 播放区域',
     });
   }
@@ -321,31 +345,39 @@ export function installPlayerController(): () => void {
     catch (error) { message('err', errorText(error)); }
   }
 
-  async function loadEpisode(episode: PlayerEpisode): Promise<void> {
-    if (!episode?.video_path || !player.libmpvReady) return;
+  async function loadEpisode(episode: PlayerEpisode, resume = true): Promise<boolean> {
+    if (!episode?.video_path || !player.libmpvReady) return false;
     playbackPreferences.save();
     const revision = ++openingRevision;
+    const owner = accountScope();
+    const valid = () => revision === openingRevision && owner === accountScope() && navigation.activePage === 'page-player' && !accounts.locked;
     player.episode = episode;
-    player.title = `${workTitle()} / 第${playerEpisodeNumber(episode)}集`;
+    player.title = `${workTitle()} / ${player.mode === 'av' ? episode.title : `第${playerEpisodeNumber(episode)}集`}`;
     thumbnails.reset(episode.video_path);
     Object.assign(player, { currentTime: 0, duration: 0, timeInput: '00:00', paused: false, handlingEnd: true, videoLoading: true, nativeVisible: false });
     try {
       const firstFrame = waitForFirstFrame(episode.video_path);
       await mpvCommand('loadfile', [episode.video_path]);
+      if (!valid()) return false;
       await mpvSetProperty('pause', false);
+      if (!valid()) return false;
       await applyFitMode();
-      await setLoopMode(player.loopMode);
+      await setLoopMode(player.loopMode, false);
       await pollStatus();
       void thumbnails.prefetch(episode.video_path, player.duration);
       if (!await firstFrame) throw new Error('视频首帧加载超时');
-      if (revision !== openingRevision) return;
-      await playbackPreferences.resume(episode);
-      if (revision !== openingRevision) return;
-      await commitVideoReveal();
+      if (!valid()) return false;
+      if (pollStatusPromise) await pollStatusPromise;
+      await pollStatus();
+      if (!valid()) return false;
+      if (resume) await playbackPreferences.resume(episode);
+      if (!valid()) return false;
+      await commitVideoReveal(valid);
+      if (!valid()) return false;
       layout.scheduleSync();
+      return true;
     } finally {
-      player.videoLoading = false;
-      player.handlingEnd = false;
+      if (revision === openingRevision) { player.videoLoading = false; player.handlingEnd = false; }
     }
   }
 
@@ -355,13 +387,29 @@ export function installPlayerController(): () => void {
   }
 
   async function playNextEpisode(forceWrap = false): Promise<void> {
+    if (advancing || player.videoLoading || accounts.locked || navigation.activePage !== 'page-player') return;
     const episodes = episodeList();
     if (!episodes.length || !player.episode) return;
     const index = episodes.findIndex((episode) => Number(episode.id) === Number(player.episode?.id));
     if (index < 0) return;
-    const nextIndex = nextPlayerEpisodeIndex(index, episodes.length, forceWrap || player.loopMode === 'all');
-    if (nextIndex === null) return;
-    await loadEpisode(episodes[nextIndex]);
+    advancing = true;
+    try {
+      // 随机以作品为单位：作品内依次播放，末集之后才换作品；不因 forceWrap 提前回到本作第一集。
+      const nextIndex = nextPlayerEpisodeIndex(index, episodes.length, player.loopMode !== 'random' && (forceWrap || player.loopMode === 'all'));
+      if (nextIndex !== null) { await loadEpisode(episodes[nextIndex], player.loopMode !== 'random'); return; }
+      if (player.loopMode !== 'random' || player.mode !== 'detail') return;
+      const revision = openingRevision, owner = accountScope(), path = player.episode.video_path;
+      await playRandomWork({
+        valid: () => revision === openingRevision && owner === accountScope() && !accounts.locked && navigation.activePage === 'page-player' && player.mode === 'detail' && player.loopMode === 'random' && player.episode?.video_path === path,
+        load: async (detail, episode) => {
+          playbackPreferences.save();
+          library.currentDetail = detail;
+          library.currentDetailWorkId = detail.work.id;
+          return loadEpisode(episode, false);
+        },
+        report: text => message('info', text),
+      });
+    } finally { advancing = false; }
   }
 
   function resetTimeInput(): void {
@@ -500,7 +548,8 @@ export function installPlayerController(): () => void {
   const playbackPreferences = createPlayerPreferences({
     player, pollStatus, report: text => message('err', text),
     setVolume: value => setVolume(value, false), setSpeed: value => setSpeed(value, false),
-    setLoop: setLoopMode, applyFit: applyFitMode,
+    setLoop: value => setLoopMode(value, false), applyFit: applyFitMode,
+    avCode: () => player.sourceKey,
   });
   registerPlayerCommands(commands);
 

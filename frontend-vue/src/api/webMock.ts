@@ -3,6 +3,9 @@ import type { ArchiveDraft } from './contracts/archive';
 import type { TagSummary, WorkDetail, WorkSummary, UnarchivedItem } from './contracts/library';
 import type { EhGallerySummary } from './contracts/eh';
 import { createDownloadScene } from './mock/downloadScene';
+import { createAvScene } from './mock/avScene';
+let avWorks = createAvScene();
+let avRoot = 'D:\\MockAvLibrary';
 import type { UserPreferences, WorkRecord } from './contracts/preferences';
 
 type InvokeArgs = Record<string, unknown>;
@@ -180,6 +183,35 @@ const ehCategoryMetrics = [
 ];
 
 const handlers: Record<string, MockHandler> = {
+  av_list_works: ({ scope }) => { mockAccounts.get(scope, 'av-browse', ''); const root=avRoot.replace(/\\+$/, '').toLowerCase()+'\\'; return structuredClone(avWorks.filter(work=>work.folder_path.toLowerCase().startsWith(root))); },
+  av_get_settings: ({ scope }) => { mockAccounts.get(scope, 'av-browse', ''); return { root_path: avRoot }; },
+  av_get_local_videos: ({ scope, code }) => { mockAccounts.get(scope, 'av-browse', ''); return structuredClone(avWorks.find(work => work.code === String(code))?.videos || []); },
+  av_bind_root: ({ scope, rootPath }) => { mockAccounts.get(scope, 'av-browse', ''); if (!String(rootPath).trim()) throw Error('请选择资料目录'); avRoot = String(rootPath); return { root_path: avRoot }; },
+  av_fetch_work: async ({ scope, code, queuedAt }) => {
+    mockAccounts.get(scope, 'av-browse', '');
+    const normalized = String(code).trim().toUpperCase().replace(/^([A-Z]{2,12})(\d{2,9})$/, '$1-$2');
+    if (!/^(?:[A-Z][A-Z0-9]{1,15}-\d{2,9}|FC2-PPV-\d{3,10})$/.test(normalized)) throw Error('请输入有效番号');
+    await new Promise(resolve => setTimeout(resolve, 650));
+    if (normalized === 'MISSING-404') throw Error('没有找到完全匹配的番号');
+    const old = avWorks.find(work => work.code === normalized);
+    const work = { ...structuredClone(old || createAvScene()[0]!), code: normalized, title: old?.title || '春の日記（ブラウザー開発用サンプル）',
+      folder_path: `${avRoot}\\${normalized}`, source_url: `https://javdb.com/v/mock${normalized.replace(/-/g, '')}`, queued_at: old?.queued_at || new Date(Number(queuedAt)).toISOString(), magnets: old?.magnets || [], videos: old?.videos || [] };
+    avWorks = [work, ...avWorks.filter(item => item.code !== normalized)];
+    return { work: structuredClone(work), warnings: [] };
+  },
+  av_add_magnet: ({ scope, code, magnet }) => {
+    mockAccounts.get(scope, 'av-browse', '');
+    const work = avWorks.find(work => work.code === String(code)); const value = String(magnet).trim();
+    if (!work) throw Error('作品尚未建档'); if (!value.startsWith('magnet:?') || value.length > 8192) throw Error('请输入有效磁力链接');
+    if (!work.magnets.includes(value)) work.magnets.push(value); return structuredClone(work);
+  },
+  av_remove_magnet: ({ scope, code, magnet }) => {
+    mockAccounts.get(scope, 'av-browse', '');
+    const work = avWorks.find(work => work.code === String(code));
+    if (!work) throw Error('作品尚未建档');
+    work.magnets = work.magnets.filter(value => value !== String(magnet).trim());
+    return structuredClone(work);
+  },
   account_state: () => mockAccounts.state(),
   account_auth: ({ id, pin }) => mockAccounts.auth(String(id), String(pin)),
   account_lock: () => mockAccounts.lock(),
@@ -192,7 +224,7 @@ const handlers: Record<string, MockHandler> = {
   set_user_preferences: ({ scope, preferences }) => mockAccounts.savePreferences(scope, preferences as UserPreferences),
   get_work_record: ({ scope, kind, contentId }) => mockAccounts.getRecord(scope, String(kind), Number(contentId)),
   set_work_record: ({ scope, record }) => mockAccounts.setRecord(scope, record as WorkRecord),
-  get_application_info: () => ({ version: '5.3.0', app_directory: '浏览器预览', database_directory: '浏览器独立数据' }),
+  get_application_info: () => ({ version: '6.0.0', app_directory: '浏览器预览', database_directory: '浏览器独立数据' }),
   initialize_media_library: () => ({ root_path: 'D:\\MockLibrary', source: 'previous', rebound_paths: 0, needs_binding: false }),
   bind_media_library: ({ rootPath }) => ({ root_path: String(rootPath || 'D:\\MockLibrary'), source: 'manual', rebound_paths: 0, needs_binding: false }),
   apply_library_updates: () => 0,
@@ -222,7 +254,7 @@ const handlers: Record<string, MockHandler> = {
   save_archive_draft: () => 'D:\\MockLibrary\\data\\meta.json',
   save_archive_episode_covers: () => [],
   save_archive_json: () => 'D:\\MockLibrary\\data\\meta.json',
-  load_cover_cache: ({ coverPaths }) => (coverPaths as string[] || []).map((path, index) => [path, path.startsWith('/@fs/') ? path : coverData(path, index, path.includes('episode') || (path.includes('eh-page') && /\/(8|19)$/.test(path)))]),
+  load_cover_cache: ({ coverPaths }) => (coverPaths as string[] || []).map((path, index) => [path, path.startsWith('/@fs/') ? path : coverData(path, index, path.includes('episode') || path.includes('av-preview') || (path.includes('eh-page') && /\/(8|19)$/.test(path)))]),
   eh_delete_gallery_record: ({ gid }) => {
     ehGalleries = ehGalleries.filter((gallery) => gallery.gid !== Number(gid));
     favoriteGalleryGids = favoriteGalleryGids.filter(value => value !== Number(gid));
@@ -245,7 +277,7 @@ const handlers: Record<string, MockHandler> = {
   scan_library_changes: () => structuredClone(emptyScan),
   detect_duplicates: () => [],
   eh_get_library_overview: () => ({
-    root_path: 'D:\\EhLibrary\\download', database_path: 'D:\\EhLibrary\\data\\export.db',
+    root_path: 'D:\\EhLibrary\\download', database_path: 'D:\\MockApp\\db\\database.db',
     total_count: ehGalleries.length,
     total_pages: ehGalleries.reduce((total, gallery) => total + gallery.pages, 0),
   }),

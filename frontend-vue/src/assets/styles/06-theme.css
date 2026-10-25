@@ -33,6 +33,7 @@
   :root[data-theme="dark"] .player-popover{background:rgba(35,38,45,.97);border-color:#444a54}
   :root[data-theme="dark"] .player-popover button{color:var(--text-secondary)}
   :root[data-theme="dark"] .player-popover button:hover{background:var(--surface-hover);color:var(--text-strong)}
+  :root[data-theme="dark"] .player-popover button.active{background:color-mix(in srgb,var(--primary) 22%,var(--panel));color:var(--text-strong)}
   :root[data-theme="dark"] .archive-ring-inner{background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}
   :root[data-theme="dark"] .console-empty{border-color:var(--line);color:var(--muted)}
   :root[data-theme="dark"] .filter-dd .dd-tag:hover:not(.selected),:root[data-theme="dark"] .year-option:hover,:root[data-theme="dark"] .month-cell:hover{background:var(--surface-hover)}

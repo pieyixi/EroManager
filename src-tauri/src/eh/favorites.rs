@@ -45,7 +45,8 @@ pub fn eh_get_favorite_galleries(
     db: tauri::State<crate::library::database::Database>,
     session: tauri::State<crate::accounts::Session>,
 ) -> Result<Vec<i64>, String> {
-    let key = match session.authorize(&scope) {
+    let state = session.0.lock().map_err(|e| e.to_string())?;
+    let key = match state.authorize(&scope) {
         Ok(key) => key,
         Err(_) => return Ok(vec![]),
     };
@@ -77,7 +78,8 @@ pub fn eh_set_gallery_favorite(
     db: tauri::State<crate::library::database::Database>,
     session: tauri::State<crate::accounts::Session>,
 ) -> Result<bool, String> {
-    let key = session.authorize(&scope)?;
+    let state = session.0.lock().map_err(|e| e.to_string())?;
+    let key = state.authorize(&scope)?;
     if favorite
         && !open_eh_db()?
             .query_row(

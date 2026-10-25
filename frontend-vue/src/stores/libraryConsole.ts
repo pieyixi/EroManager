@@ -264,7 +264,7 @@ export const useLibraryConsoleStore = defineStore('libraryConsole', {
       }
     },
     async backupDatabase(): Promise<void> {
-      const path = this.backupPath.trim() || 'D:\\HAnime\\backup.db';
+      const path = this.backupPath.trim() || 'D:\\Ark\\backup\\ero-manager backup\\database.db';
       try {
         await settingsApi.backupDatabase(path);
         this.databaseMessage = { kind: 'info', text: `备份成功: ${path}` };
@@ -274,7 +274,7 @@ export const useLibraryConsoleStore = defineStore('libraryConsole', {
     },
     async backupDataPackage(): Promise<void> {
       if (this.busy) return;
-      const path = this.backupPath.trim() || 'D:\\Ark\\ero-data-backup.zip';
+      const path = this.backupPath.trim() || 'D:\\Ark\\backup\\ero-manager backup\\ero-data-backup.zip';
       this.backupRunning = true;
       this.databaseMessage = null;
       this.setProgress(true, 1, '正在准备资料包备份');

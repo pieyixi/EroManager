@@ -2,11 +2,13 @@
 import { computed } from 'vue';
 import { type DropdownPosition, type FilterKey, useLibraryStore } from '../../stores/library';
 import { type EhFilterKey, useEhLibraryStore } from '../../stores/ehLibrary';
+import { avFilterLabels, useAvLibraryStore } from '../../stores/avLibrary';
 
-defineProps<{ ehDropdownPosition: DropdownPosition }>();
+defineProps<{ ehDropdownPosition: DropdownPosition; avDropdownPosition: DropdownPosition }>();
 
 const library = useLibraryStore();
 const ehLibrary = useEhLibraryStore();
+const avLibrary = useAvLibraryStore();
 
 const filterLabels: Record<FilterKey, string> = {
   year: '发行时间',
@@ -40,6 +42,24 @@ const activeFilterCount = computed(() =>
 </script>
 
 <template>
+  <Teleport to="body">
+    <div v-if="avLibrary.openDropdown" class="filter-dd av-filter-dd" :data-key="avLibrary.openDropdown"
+      :style="{ top: `${avDropdownPosition.top}px`, left: `${avDropdownPosition.left}px`, width: `${avDropdownPosition.width}px`, transform: 'translateX(-50%)' }"
+      @click.stop @keydown.esc="avLibrary.closeDropdown">
+      <div class="filter-dd-head"><strong>{{ avFilterLabels[avLibrary.openDropdown] }}</strong>
+        <span v-if="avLibrary.activeFilters[avLibrary.openDropdown]?.length" class="filter-dd-count">已选 {{ avLibrary.activeFilters[avLibrary.openDropdown]?.length }}</span>
+      </div>
+      <div class="dd-body" :class="avLibrary.openDropdown === 'tag' ? 'row' : 'col'">
+        <button v-for="option in avLibrary.options(avLibrary.openDropdown)" :key="option" class="dd-tag"
+          :class="{ selected: avLibrary.isSelected(avLibrary.openDropdown, option) }" @click="avLibrary.toggleFilter(avLibrary.openDropdown!, option)">{{ option }}</button>
+        <span v-if="!avLibrary.options(avLibrary.openDropdown).length" class="av-filter-empty">暂无选项</span>
+      </div>
+      <div class="dd-actions">
+        <button class="dd-reset" :disabled="!avLibrary.isFilterActive(avLibrary.openDropdown)" @click="avLibrary.clearFilter(avLibrary.openDropdown!)">重置</button>
+        <button class="dd-confirm" @click="avLibrary.closeDropdown">完成</button>
+      </div>
+    </div>
+  </Teleport>
   <Teleport to="body">
     <div
       v-if="library.openDropdown"
@@ -147,3 +167,7 @@ const activeFilterCount = computed(() =>
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+.av-filter-empty { padding: 10px; color: var(--muted); font-size: 12px; }
+</style>

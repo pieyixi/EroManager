@@ -5,7 +5,6 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-const EH_DATABASE_FILE: &str = "eh-database.db";
 static EH_SCHEMA: Mutex<()> = Mutex::new(());
 pub(crate) fn portable_path(path: &Path) -> String {
     let value = path.to_string_lossy();
@@ -15,15 +14,19 @@ pub(crate) fn portable_path(path: &Path) -> String {
     value.strip_prefix(r"\\?\").unwrap_or(&value).to_string()
 }
 pub(crate) fn eh_db_path() -> Result<PathBuf, String> {
-    crate::paths::portable_database_path(EH_DATABASE_FILE)
+    crate::paths::portable_database_path("database.db")
         .map_err(|error| format!("无法定位本子数据库: {error}"))
 }
 
 pub(crate) fn open_eh_db() -> Result<Connection, String> {
     let path = eh_db_path()?;
-    let connection = Connection::open(&path)
-        .map_err(|error| format!("无法打开 本子数据库 {}: {error}", path.display()))?;
-    initialize_eh_schema(&connection)?;
+    // 主库在应用入口统一完成建表/迁移；业务查询只打开连接，避免每次请求写 schema。
+    let connection =
+        Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(|error| format!("无法打开 本子数据库 {}: {error}", path.display()))?;
+    connection
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
     Ok(connection)
 }
 

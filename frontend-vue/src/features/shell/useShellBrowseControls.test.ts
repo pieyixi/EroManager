@@ -54,6 +54,21 @@ describe('shell browse controller', () => {
     controls.clearSearch(); await nextTick(); expect(input.focus).not.toHaveBeenCalled();
   });
 
+  it('routes AV search and clear independently without consuming either existing library state', async () => {
+    const controls = scope.run(useShellBrowseControls)!;
+    controls.library.search = 'media'; controls.ehLibrary.search = 'book';
+    useNavigationStore().showPage('page-av-library'); await nextTick();
+    expect(controls.isBrowsePage.value).toBe(true);
+    controls.avLibrary.codePage = 3; controls.avLibrary.actressPage = 2;
+    controls.shellSearch.value = '女优';
+    expect(controls.avLibrary.search).toBe('女优');
+    expect(controls.avLibrary.codePage).toBe(1); expect(controls.avLibrary.actressPage).toBe(1);
+    controls.avLibrary.toggleDropdown('studio'); controls.expandSearch();
+    expect(controls.avLibrary.openDropdown).toBe(null);
+    controls.clearSearch(); expect(controls.avLibrary.search).toBe('');
+    expect(controls.library.search).toBe('media'); expect(controls.ehLibrary.search).toBe('book');
+  });
+
   it.each(['page-media-library', 'page-eh-library'] as const)('clears without focusing or changing the search pose on %s', async page => {
     const controls = scope.run(useShellBrowseControls)!;
     useNavigationStore().showPage(page); await nextTick();
@@ -81,6 +96,9 @@ describe('shell browse controller', () => {
     controls.bindSearchContainer({ contains: () => false });
     const pointer = documentStub.addEventListener.mock.calls.find(([name]) => name === 'pointerdown')![1];
     pointer({ target: {} }); expect(controls.searchExpanded.value).toBe(false);
+    controls.avLibrary.toggleDropdown('studio');
+    const keyboard = documentStub.addEventListener.mock.calls.find(([name]) => name === 'keydown')![1];
+    keyboard({ key: 'Escape' }); expect(controls.avLibrary.openDropdown).toBe(null);
     lifecycle.unmounted.forEach(callback => callback()); lifecycle.unmounted.length = 0;
     expect(documentStub.removeEventListener.mock.calls).toEqual(documentStub.addEventListener.mock.calls);
   });

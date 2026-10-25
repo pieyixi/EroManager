@@ -29,7 +29,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for ownership, dependency direction and
 
 Browser development includes a default download showcase: eight cards per source covering queued, active, failed-page, failed-request and completed states. These snapshots are installed only by the development browser runtime, do not start a worker or write history, and the sample queue is removed before a manual download starts. Production bundles exclude the fixture modules.
 
-Downloads run independent Eh and Hitomi FIFO workers, one active work per source. Both sources can run together without changing the existing per-work three-image parallelism, newest-first card order or credential-free history format.
+Downloads run independent Eh and Hitomi FIFO workers, one active work per source. Both sources can run together. Each source has a persistent image-concurrency preference from 1 to 5 (default 3), captured when a work or retry starts; changing it affects the next work. Display order stays newest-first, independently of FIFO execution, and history excludes credentials.
 
 ## Compatibility and Validation
 

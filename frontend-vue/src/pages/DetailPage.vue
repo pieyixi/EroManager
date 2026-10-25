@@ -7,6 +7,9 @@ import { type FilterKey, useLibraryStore } from "../stores/library";
 import { type EhFilterKey, ehDisplayValues, useEhLibraryStore } from "../stores/ehLibrary";
 import { useEhReaderStore } from "../stores/ehReader";
 import { useNavigationStore } from "../stores/navigation";
+import { useAvLibraryStore } from '../stores/avLibrary';
+import CoverImage from '../components/shared/CoverImage.vue';
+import AvDetailContent from '../components/av/AvDetailContent.vue';
 
 const coverElement = ref<HTMLElement | null>(null);
 const coverImage = ref<HTMLImageElement | null>(null);
@@ -16,6 +19,9 @@ const library = useLibraryStore();
 const ehLibrary = useEhLibraryStore();
 const ehReader = useEhReaderStore();
 const navigation = useNavigationStore();
+const avLibrary = useAvLibraryStore();
+const isAvDetail = computed(() => navigation.detailSource === 'av');
+const avWork = computed(() => isAvDetail.value ? avLibrary.currentWork : null);
 const detail = computed(() => library.currentDetail);
 const work = computed(() => detail.value?.work);
 const isEhDetail = computed(() => navigation.detailSource === "eh");
@@ -23,20 +29,23 @@ const ehGallery = computed(() =>
   isEhDetail.value ? ehLibrary.currentGallery : null,
 );
 const displayTitle = computed(
-  () => ehGallery.value?.title || work.value?.title || "",
+  () => isAvDetail.value ? avWork.value?.title || '' : ehGallery.value?.title || work.value?.title || "",
 );
 const displayCoverPath = computed(
-  () => ehGallery.value?.cover_path || work.value?.cover_path || "",
+  () => isAvDetail.value ? avWork.value?.cover || '' : ehGallery.value?.cover_path || work.value?.cover_path || "",
 );
 const displayFolderPath = computed(
-  () => ehGallery.value?.folder_path || work.value?.folder_path || "",
+  () => isAvDetail.value ? avWork.value?.folder_path || '' : ehGallery.value?.folder_path || work.value?.folder_path || "",
 );
 const displayCoverUrl = computed(() =>
-  isEhDetail.value
+  isAvDetail.value ? avLibrary.imageUrl(displayCoverPath.value) : isEhDetail.value
     ? ehLibrary.coverUrl(displayCoverPath.value)
     : library.coverUrl(displayCoverPath.value),
 );
 const episodes = computed(() => detail.value?.episodes || []);
+watch(() => [avWork.value, navigation.activePage], () => {
+  if (avWork.value && navigation.activePage === 'page-detail') void avLibrary.loadImages([avWork.value.cover]);
+}, { flush: 'post' });
 
 type DetailTag = Pick<TagSummary, "name" | "category"> & { id?: number; rawName?: string };
 
@@ -174,11 +183,12 @@ function isFavoriteTag(row: DetailRow, tag: DetailTag): boolean {
     id="page-detail"
   >
     <div class="detail">
-      <div v-if="work || ehGallery" class="detail-layout">
+      <div v-if="isAvDetail ? avWork : isEhDetail ? ehGallery : work" class="detail-layout">
         <div class="detail-left">
           <div ref="coverElement" class="detail-cover" id="detailCover" :class="{ 'home-detail-cover-hidden': !!detailTransitionSource && coverFlightVisible }">
+            <CoverImage v-if="isAvDetail" :src="displayCoverUrl" :alt="avWork?.code || ''" :jacket="!avWork?.cover_layout || avWork.cover_layout === 'jacket'" @node="coverImage = $event" />
             <img ref="coverImage"
-              v-if="displayCoverUrl"
+              v-else-if="displayCoverUrl"
               :src="displayCoverUrl"
               style="width: 100%; height: 100%; object-fit: cover"
               @error="imageError"
@@ -189,13 +199,16 @@ function isFavoriteTag(row: DetailRow, tag: DetailTag): boolean {
             <button
               class="btn-secondary"
               id="btnOpenFolder"
+              :disabled="!displayFolderPath"
               @click="library.openWorkFolder(displayFolderPath)"
             >
               &#128451; 打开文件夹
             </button>
           </div>
         </div>
-        <div class="detail-right">
+        <div class="detail-right" :class="{ 'av-detail-right': isAvDetail }">
+          <AvDetailContent v-if="avWork" :work="avWork" />
+          <template v-else>
           <div class="detail-main">
             <div class="detail-title" id="detailTitle">{{ displayTitle }}</div>
             <div class="detail-tags" id="detailTags">
@@ -309,6 +322,7 @@ function isFavoriteTag(row: DetailRow, tag: DetailTag): boolean {
               </button>
             </div>
           </div>
+          </template>
         </div>
       </div>
     </div>
@@ -316,6 +330,8 @@ function isFavoriteTag(row: DetailRow, tag: DetailTag): boolean {
 </template>
 
 <style scoped>
+.av-detail-right { scrollbar-gutter: stable; }
+.detail-cover { position: relative; }
 .eh-read-panel {
   min-height: 138px;
 }

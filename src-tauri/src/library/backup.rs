@@ -1,20 +1,131 @@
 use crate::library::database::Database;
 use crate::library::models::is_video_file;
-use crate::paths::{portable_app_dir, portable_database_path};
+use crate::paths::{portable_backup_dir, portable_database_path};
 use crate::shared::*;
+use tauri::Emitter;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn backup_database(backup_path: String, db: State<Database>) -> Result<(), String> {
+    if let Some(parent) = std::path::Path::new(&backup_path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute("VACUUM INTO ?1", params![backup_path])
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-#[tauri::command]
-pub fn restore_database(restore_path: String) -> Result<(), String> {
+#[tauri::command(async)]
+pub fn restore_database(
+    restore_path: String,
+    db: State<Database>,
+    session: State<crate::accounts::Session>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
     let db_file = portable_database_path("database.db").map_err(|error| error.to_string())?;
-    std::fs::copy(&restore_path, &db_file).map_err(|e| format!("恢复失败: {}", e))?;
+    let source_path = std::path::Path::new(&restore_path)
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    if source_path == db_file.canonicalize().map_err(|e| e.to_string())? {
+        return Err("不能用正在运行的数据库恢复自身".into());
+    }
+    // 与其他个人数据命令保持 session -> db 的锁序。
+    let mut state = session.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    restore_snapshot(
+        &mut conn,
+        &source_path,
+        &portable_backup_dir().map_err(|e| e.to_string())?,
+    )?;
+    state.token.clear();
+    state.key = None;
+    let initialized = crate::accounts::initialize(&mut conn, false);
+    let _ = app.emit("accounts-admin-changed", true);
+    initialized?;
+    Ok(())
+}
+
+fn restore_snapshot(
+    conn: &mut Connection,
+    source_path: &std::path::Path,
+    backup_root: &std::path::Path,
+) -> Result<(), String> {
+    let source =
+        Connection::open_with_flags(source_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| e.to_string())?;
+    let result: String = source
+        .query_row("PRAGMA quick_check", [], |r| r.get(0))
+        .map_err(|e| format!("备份无法读取：{e}"))?;
+    if result != "ok" {
+        return Err("备份完整性检查失败".into());
+    }
+    let tables: Vec<String> = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
+        .map_err(|e| e.to_string())?;
+    for table in tables {
+        let quoted = format!("\"{}\"", table.replace('"', "\"\""));
+        let columns: Vec<String> = conn
+            .prepare(&format!("PRAGMA table_info({quoted})"))
+            .and_then(|mut s| s.query_map([], |r| r.get::<_, String>(1))?.collect())
+            .map_err(|e| e.to_string())?;
+        let source_columns: Vec<String> = source
+            .prepare(&format!("PRAGMA table_info({quoted})"))
+            .and_then(|mut s| s.query_map([], |r| r.get::<_, String>(1))?.collect())
+            .map_err(|e| e.to_string())?;
+        // v6 的 AV 索引是可追加重建的表；完整的旧并库备份可以没有它。
+        if table == "AvWorks" && source_columns.is_empty() { continue; }
+        if columns.iter().any(|name| !source_columns.contains(name)) {
+            return Err("备份缺少当前数据表或字段，请选择并库后的完整数据库备份".into());
+        }
+    }
+    let unified: bool = source
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM AppSettings WHERE Key='unified_database_v1')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !unified {
+        return Err("请选择并库后的完整数据库备份，旧分库备份不能单独覆盖主库".into());
+    }
+    if source
+        .prepare("PRAGMA foreign_key_check")
+        .and_then(|mut s| s.exists([]))
+        .map_err(|e| e.to_string())?
+    {
+        return Err("备份中存在无效的数据关联，已取消恢复".into());
+    }
+    let timestamp: String = conn
+        .query_row(
+            "SELECT strftime('%Y-%m-%d_%H-%M-%f','now','localtime')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let before = backup_root.join(format!("恢复前_{}.db", timestamp.replace('.', "-")));
+    conn.execute("VACUUM INTO ?1", [before.to_string_lossy().as_ref()])
+        .map_err(|e| format!("恢复前备份失败：{e}"))?;
+    // SQLite backup API 在同一数据库连接上原子替换，正确处理 WAL；失败时保留原数据库。
+    {
+        let restore = rusqlite::backup::Backup::new(&source, conn).map_err(|e| e.to_string())?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match restore.step(256).map_err(|e| e.to_string())? {
+                rusqlite::backup::StepResult::Done => break,
+                rusqlite::backup::StepResult::More => {}
+                _ if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(50))
+                }
+                _ => return Err("数据库仍被占用，已取消恢复，请稍后重试".into()),
+            }
+        }
+    }
+    crate::av::invalidate_inflight();
+    crate::av::initialize(conn)?;
     Ok(())
 }
 
@@ -357,8 +468,8 @@ pub async fn backup_data_package(
         };
 
         emit_backup_progress(&app, 4, "正在生成数据库快照");
-        let temp_db = portable_app_dir()
-            .join("db")
+        let temp_db = portable_backup_dir()
+            .map_err(|e| e.to_string())?
             .join("temp")
             .join("backup-database.db");
         if let Some(parent) = temp_db.parent() {
@@ -418,3 +529,77 @@ pub async fn backup_data_package(
 }
 
 // ─── App Entry ────────────────────────────────────────────
+
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+    #[test]
+    fn restores_wal_database_through_live_connection_and_rejects_incomplete_backup() {
+        let root = std::env::temp_dir().join(format!(
+            "ero-restore-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let mut target = Connection::open(root.join("database.db")).unwrap();
+        target.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE AppSettings(Key TEXT PRIMARY KEY,Value TEXT); INSERT INTO AppSettings VALUES('unified_database_v1',''); CREATE TABLE EhGalleries(Gid INTEGER PRIMARY KEY,Title TEXT); INSERT INTO EhGalleries VALUES(-123,'before');").unwrap();
+        let source = Connection::open(root.join("source.db")).unwrap();
+        source.execute_batch("CREATE TABLE AppSettings(Key TEXT PRIMARY KEY,Value TEXT); INSERT INTO AppSettings VALUES('unified_database_v1',''); CREATE TABLE EhGalleries(Gid INTEGER PRIMARY KEY,Title TEXT); INSERT INTO EhGalleries VALUES(123,'restored');").unwrap();
+        drop(source);
+        // v5 统一备份没有 AV 表，升级后仍须能够恢复，并重新建立空索引。
+        crate::av::initialize(&target).unwrap();
+        let reader = Connection::open(root.join("database.db")).unwrap();
+        restore_snapshot(&mut target, &root.join("source.db"), &root).unwrap();
+        assert_eq!(target.query_row("SELECT COUNT(*) FROM AvWorks", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            target
+                .query_row("SELECT Gid FROM EhGalleries", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            123
+        );
+        assert_eq!(
+            reader
+                .query_row("SELECT Title FROM EhGalleries", [], |r| r
+                    .get::<_, String>(0))
+                .unwrap(),
+            "restored"
+        );
+        assert_eq!(
+            target
+                .query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+        let before = std::fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .find(|e| e.file_name().to_string_lossy().starts_with("恢复前_"))
+            .unwrap();
+        let before = Connection::open(before.path()).unwrap();
+        assert_eq!(
+            before
+                .query_row("SELECT Gid FROM EhGalleries", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            -123
+        );
+        drop(before);
+        let invalid = Connection::open(root.join("old.db")).unwrap();
+        invalid
+            .execute_batch("CREATE TABLE AppSettings(Key TEXT PRIMARY KEY,Value TEXT);")
+            .unwrap();
+        drop(invalid);
+        assert!(restore_snapshot(&mut target, &root.join("old.db"), &root).is_err());
+        assert_eq!(
+            target
+                .query_row("SELECT Gid FROM EhGalleries", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            123
+        );
+        drop(reader);
+        drop(target);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

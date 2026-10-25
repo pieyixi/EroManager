@@ -8,13 +8,25 @@ pub(crate) fn portable_app_dir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
+/// 备份独立于正式安装目录；便携移动后保持相同的同级 backup 布局。
+pub(crate) fn portable_backup_dir() -> std::io::Result<std::path::PathBuf> {
+    let app = portable_app_dir();
+    let directory = app
+        .parent()
+        .unwrap_or(&app)
+        .join("backup")
+        .join("ero-manager backup");
+    std::fs::create_dir_all(&directory)?;
+    Ok(directory)
+}
+
 /// 所有运行数据库只使用 db 子目录；不探测根目录或旧 AppData，避免双库冲突。
 pub(crate) fn portable_database_path(name: &str) -> std::io::Result<std::path::PathBuf> {
     database_path_in(&portable_app_dir(), name)
 }
 
 fn database_path_in(root: &std::path::Path, name: &str) -> std::io::Result<std::path::PathBuf> {
-    if !matches!(name, "database.db" | "eh-database.db") {
+    if name != "database.db" {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "unsupported portable database name",
@@ -40,7 +52,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&root).unwrap();
-        for name in ["database.db", "eh-database.db"] {
+        for name in ["database.db"] {
             let target = root.join("db").join(name);
             assert_eq!(database_path_in(&root, name).unwrap(), target);
             let legacy = root.join(name);
@@ -78,6 +90,7 @@ mod tests {
             assert_eq!(std::fs::read(&legacy).unwrap(), original);
         }
         assert!(database_path_in(&root, "../outside.db").is_err());
+        assert!(database_path_in(&root, "eh-database.db").is_err());
         // 测试仅移除自己创建且已验证位于系统临时目录的隔离夹具。
         assert!(root.starts_with(std::env::temp_dir()));
         std::fs::remove_dir_all(root).unwrap();

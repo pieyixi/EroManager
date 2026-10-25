@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue';
 import { playerCommands } from '../features/player/commands';
-import { formatPlayerSpeed, formatPlayerTime, playerEpisodeNumber, playerEpisodeSubtitle, playerFitModes } from '../features/player/model';
+import { formatPlayerSpeed, formatPlayerTime, playerEpisodeNumber, playerEpisodeSubtitle, playerFitModes, playerLoopOptions, orderedPlayerEpisodes } from '../features/player/model';
 import type { PlayerEpisode } from '../api/contracts/library';
 import { useArchiveStore } from '../stores/archive';
 import { useLibraryStore } from '../stores/library';
+import { useAvLibraryStore } from '../stores/avLibrary';
+import { avPlayerEpisodes } from '../features/player/avPlayback';
+import CoverImage from '../components/shared/CoverImage.vue';
 import { useNavigationStore } from '../stores/navigation';
 import { usePlayerStore, type PlayerVideoHole } from '../stores/player';
 import ShellBackButton from '../components/shared/ShellBackButton.vue';
 
 const archive = useArchiveStore();
 const library = useLibraryStore();
+const avLibrary = useAvLibraryStore();
 const navigation = useNavigationStore();
 const player = usePlayerStore();
 const stageElement = ref<HTMLElement | null>(null);
@@ -18,20 +22,21 @@ const controlsElement = ref<HTMLElement | null>(null);
 const descriptionElement = ref<HTMLElement | null>(null);
 let descriptionObserver: ResizeObserver | null = null;
 
-const playlist = computed<PlayerEpisode[]>(() => player.mode === 'detail'
-  ? (library.currentDetail?.episodes || []).filter((episode) => episode.video_path) as PlayerEpisode[]
-  : (archive.draft?.episode_list || []).filter((episode) => episode.video_path) as PlayerEpisode[]);
-const workTitle = computed(() => player.mode === 'detail' ? library.currentDetail?.work.title || '' : archive.draft?.title || '未命名作品');
-const studio = computed(() => player.mode === 'detail' ? library.currentDetail?.work.studio || '' : archive.draft?.studio || '');
-const description = computed(() => player.mode === 'detail' ? library.currentDetail?.work.description || '' : archive.draft?.synopsis || '');
-const characters = computed(() => player.mode === 'detail'
+const playlist = computed<PlayerEpisode[]>(() => player.mode === 'av' ? avPlayerEpisodes(avLibrary.currentWork) : player.mode === 'detail'
+  ? orderedPlayerEpisodes(library.currentDetail?.episodes || [])
+  : orderedPlayerEpisodes(archive.draft?.episode_list || []));
+const workTitle = computed(() => player.mode === 'av' ? `${avLibrary.currentWork?.code || ''} ${avLibrary.currentWork?.title || ''}`.trim() : player.mode === 'detail' ? library.currentDetail?.work.title || '' : archive.draft?.title || '未命名作品');
+const studio = computed(() => player.mode === 'av' ? avLibrary.currentWork?.studio || '' : player.mode === 'detail' ? library.currentDetail?.work.studio || '' : archive.draft?.studio || '');
+const description = computed(() => player.mode === 'av' ? '' : player.mode === 'detail' ? library.currentDetail?.work.description || '' : archive.draft?.synopsis || '');
+const characters = computed(() => player.mode === 'av' ? avLibrary.currentWork?.actresses.map(actor => actor.name) || [] : player.mode === 'detail'
   ? (library.currentDetail?.characters || []).filter(Boolean)
   : Object.keys(archive.draft?.characters || {}).sort((left, right) => Number(left) - Number(right)).map((key) => archive.draft?.characters[key] || '').filter(Boolean));
 const currentEpisodeId = computed(() => Number(player.episode?.id));
 const currentEpisodeIndex = computed(() => playlist.value.findIndex((episode) => Number(episode.id) === currentEpisodeId.value));
-const nextDisabled = computed(() => currentEpisodeIndex.value < 0 || (currentEpisodeIndex.value >= playlist.value.length - 1 && player.loopMode !== 'all'));
+const nextDisabled = computed(() => currentEpisodeIndex.value < 0 || (currentEpisodeIndex.value >= playlist.value.length - 1 && player.loopMode !== 'all' && !(player.loopMode === 'random' && player.mode === 'detail')));
 const seekProgress = computed(() => player.duration > 0 ? Math.max(0, Math.min(100, player.currentTime / player.duration * 100)) : 0);
 const speedLabel = computed(() => Math.abs(player.speed - 1) < 0.01 ? '倍速' : formatPlayerSpeed(player.speed));
+const loopOptions = computed(() => player.mode === 'av' ? playerLoopOptions.filter(option => option.value !== 'random') : playerLoopOptions);
 const previewStyle = computed(() => ({ left: `${player.previewLeft}px` }));
 const previewFrameStyle = computed(() => ({ backgroundImage: player.previewImage ? `url("${player.previewImage}")` : '' }));
 function videoHoleStyle(rect: PlayerVideoHole): Record<string, string> {
@@ -39,6 +44,7 @@ function videoHoleStyle(rect: PlayerVideoHole): Record<string, string> {
 }
 
 function episodeCover(episode: PlayerEpisode): string {
+  if (player.mode === 'av') return avLibrary.imageUrl(episode.cover_path || '');
   const number = playerEpisodeNumber(episode);
   return library.coverUrl(episode.cover_path || undefined) || (player.mode === 'archive' ? archive.episodeCoverData[number] || '' : '');
 }
@@ -161,7 +167,7 @@ onBeforeUnmount(() => {
               <div class="player-command-row">
                 <div class="player-command-group transport-group">
                   <button class="player-control-icon primary fluent-icon" id="playerPlayBtn" @click="playerCommands.togglePlay" :title="player.paused ? '播放' : '暂停'" aria-label="播放/暂停">{{ player.paused ? '\uE768' : '\uE769' }}</button>
-                  <button class="player-control-icon fluent-icon" id="playerNextBtn" :disabled="nextDisabled" @click="playerCommands.playNextEpisode()" title="下一集" aria-label="下一集">&#xE893;</button>
+                  <button class="player-control-icon fluent-icon" id="playerNextBtn" :disabled="nextDisabled" @click="playerCommands.playNextEpisode()" :title="player.mode === 'av' ? '下一个视频' : '下一集'" :aria-label="player.mode === 'av' ? '下一个视频' : '下一集'">&#xE893;</button>
                   <div class="player-time-editor">
                     <input id="playerTimeInput" v-model="player.timeInput" aria-label="当前播放时间" @focus="focusTime" @keydown="timeKeydown" @blur="blurTime">
                     <span>/</span>
@@ -179,7 +185,7 @@ onBeforeUnmount(() => {
                   <div class="player-popover-wrap">
                     <button class="player-control-icon fluent-icon" title="播放设置" aria-label="播放设置">&#xE713;</button>
                     <div class="player-popover settings-popover">
-                      <button v-for="option in [{ value: 'off', label: '关闭循环' }, { value: 'one', label: '单集循环' }, { value: 'all', label: '列表循环' }]" :key="option.value" :class="{ active: player.loopMode === option.value }" :data-loop-mode="option.value" @click="playerCommands.setLoopMode(option.value)">{{ option.label }}</button>
+                      <button v-for="option in loopOptions" :key="option.value" :class="{ active: player.loopMode === option.value }" :data-loop-mode="option.value" @click="playerCommands.setLoopMode(option.value)">{{ option.label }}</button>
                       <div class="player-popover-separator"></div>
                       <button id="fitModeBtn" @click="playerCommands.cycleFitMode">画面：{{ playerFitModes[player.fitMode].label }}</button>
                     </div>
@@ -213,17 +219,19 @@ onBeforeUnmount(() => {
             <section class="player-other-episodes">
               <div class="player-other-head">
                 <strong>播放列表</strong>
-                <span id="playerOtherCount">{{ playlist.length ? `${playlist.length} 集` : '' }}</span>
+                <span id="playerOtherCount">{{ playlist.length ? `${playlist.length} ${player.mode === 'av' ? '个视频' : '集'}` : '' }}</span>
               </div>
               <div class="player-other-list" id="playerOtherEpisodes">
                 <div v-if="!playlist.length" class="player-other-empty">暂无播放内容</div>
                 <button v-for="episode in playlist" :key="episode.id" class="player-other-item" :class="{ current: Number(episode.id) === currentEpisodeId }" :aria-current="Number(episode.id) === currentEpisodeId || undefined" @click="playEpisode(episode)">
-                  <span class="player-other-cover">
-                    <img v-if="episodeCover(episode)" :src="episodeCover(episode)" :alt="`第${playerEpisodeNumber(episode)}集封面`" @error="imageError">
+                  <span class="player-other-cover" :class="{ 'player-av-cover': player.mode === 'av' }">
+                    <CoverImage v-if="player.mode === 'av'" :src="episodeCover(episode)" :alt="episode.title || ''" :jacket="avLibrary.currentWork?.cover_layout !== 'portrait'" />
+                    <img v-else-if="episodeCover(episode)" :src="episodeCover(episode)" :alt="`第${playerEpisodeNumber(episode)}集封面`" @error="imageError">
                     <template v-else>暂无封面</template>
                   </span>
                   <span class="player-other-copy">
-                    <span>第 {{ String(playerEpisodeNumber(episode)).padStart(2, '0') }} 集{{ Number(episode.id) === currentEpisodeId ? ' · 播放中' : '' }}</span>
+                    <span v-if="player.mode === 'av'">{{ episode.title }}{{ Number(episode.id) === currentEpisodeId ? ' · 播放中' : '' }}</span>
+                    <span v-else>第 {{ String(playerEpisodeNumber(episode)).padStart(2, '0') }} 集{{ Number(episode.id) === currentEpisodeId ? ' · 播放中' : '' }}</span>
                     <strong v-if="playerEpisodeSubtitle(episode, workTitle)">{{ playerEpisodeSubtitle(episode, workTitle) }}</strong>
                     <small v-if="episode.release_date">{{ episode.release_date }}</small>
                   </span>
@@ -236,3 +244,6 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+<style scoped>
+.player-av-cover { position: relative; }
+</style>

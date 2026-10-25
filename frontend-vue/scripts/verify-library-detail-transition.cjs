@@ -1,4 +1,5 @@
 const {chromium}=require('playwright');const assert=require('node:assert/strict');const path=require('node:path');const os=require('node:os');
+const {visibleFlightImage}=require('./cover-flight-qa.cjs');
 (async()=>{const browser=await chromium.launch();let cases=0;try{
 for(const[width,height]of [[1920,1080],[1366,768],[1280,720]])for(const theme of ['light','dark']){
  const page=await browser.newPage({viewport:{width,height}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -13,6 +14,7 @@ for(const[width,height]of [[1920,1080],[1366,768],[1280,720]])for(const theme of
   for(const lane of entry==='page-eh-download'?['eh','hitomi']:['grid']){
    const selector=entry==='page-media-library'?'#page-media-library .cover-card:first-child .cover-img':entry==='page-eh-library'?'#page-eh-library .cover-card:first-child .cover-img':`.eh-download-lane[aria-label="${lane==='eh'?'Eh':'Hitomi'} 下载"] .eh-download-card[data-gid="${lane==='eh'?'':'-'}910002"] .eh-download-poster`;
    if(lane!=='grid'){
+    await page.getByRole('tab',{name:lane==='eh'?'Eh 下载':'Hitomi 下载',exact:true}).click();
     await page.locator('.eh-download-lane-results').evaluateAll(elements=>{elements[0].scrollTop=145;elements[1].scrollTop=240});
     await page.locator(selector).scrollIntoViewIfNeeded();
    }
@@ -35,15 +37,15 @@ for(const[width,height]of [[1920,1080],[1366,768],[1280,720]])for(const theme of
  async function verify(direction,selector,label,origin){
   const flight=page.locator(`.home-detail-flight[data-direction="${direction}"]`);await flight.waitFor({state:'visible'});
   const before=await page.locator(selector).first().boundingBox();
-  const animations=await flight.evaluate(e=>e.getAnimations({subtree:true}).map(a=>a.effect.getKeyframes()));assert.equal(animations.length,2);assert(animations.every(frames=>frames.every(f=>!('width'in f)&&!('height'in f))));
+  const animations=await flight.evaluate(e=>e.getAnimations({subtree:true}).map(a=>a.effect.getKeyframes()));assert.equal(animations.length,direction==='return'&&label.startsWith('page-eh-download')?3:2);assert(animations.every(frames=>frames.every(f=>!('width'in f)&&!('height'in f))));
   await flight.evaluate(e=>e.getAnimations({subtree:true}).forEach(a=>{a.pause();a.currentTime=180}));
   const mid=await page.locator('.home-detail-flight-frame').boundingBox();assert(mid.width>0);if(origin)assert(mid.width>=Math.min(origin.width,before.width)-1&&mid.width<=Math.max(origin.width,before.width)+1);
   await page.screenshot({path:path.join(os.tmpdir(),`ero-grid-flight-${width}-${theme}-${label}-${direction}-middle.png`)});
   await flight.evaluate(e=>e.getAnimations({subtree:true}).forEach(a=>{a.currentTime=599}));
-  const frame=await page.locator('.home-detail-flight-frame').boundingBox(),image=await page.locator('.home-detail-flight-image').boundingBox(),actualImage=await page.locator(`${selector} img`).first().boundingBox();
+  const frame=await page.locator('.home-detail-flight-frame').boundingBox(),image=await visibleFlightImage(page),actualImage=await page.locator(`${selector} img`).first().boundingBox();
   await flight.evaluate(e=>e.getAnimations({subtree:true}).forEach(a=>a.play()));await flight.waitFor({state:'detached'});await page.waitForTimeout(250);
   const after=await page.locator(selector).first().boundingBox();for(const key of ['x','y','width','height']){assert(Math.abs(before[key]-after[key])<.05,`Live ${label} ${direction} ${key} shifted ${before[key]} -> ${after[key]}`);assert(Math.abs(frame[key]-after[key])<.3,`Frame ${label} ${direction} ${key} missed`);assert(Math.abs(image[key]-actualImage[key])<.3,`Image ${label} ${direction} ${key} missed`)}
  }
 }
-console.log(`PASS ${cases} grid/download cases: both directions, three sizes, light/dark, transform-only two-layer cover motion, stable endpoints, both download scroll positions and reader return chain`);
+console.log(`PASS ${cases} grid/download cases: both directions, three sizes, light/dark, two local cover layers without animated sizes, stable endpoints, both download scroll positions and reader return chain`);
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exit(1)});

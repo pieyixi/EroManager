@@ -5,6 +5,7 @@ mod admin_pipe;
 mod admin_screen;
 mod commands;
 mod privacy;
+mod process_mutex;
 mod security;
 mod storage;
 mod terminal;
@@ -14,7 +15,6 @@ mod tui;
 pub use commands::*;
 use rusqlite::Connection;
 use std::{
-    fs::File,
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -73,33 +73,29 @@ impl Session {
         }
         Ok(Self(Mutex::new(state)))
     }
+    #[cfg(test)]
     pub fn authorize(&self, scope: &str) -> Result<i64, String> {
         let state = self.0.lock().map_err(|e| e.to_string())?;
         state.authorize(scope)
     }
 }
 pub fn initialize(conn: &mut Connection, backup: bool) -> Result<(), String> {
-    storage::initialize(conn, backup)
-}
-pub fn process_lock() -> Result<File, String> {
-    named_lock("application.lock")
-}
-fn named_lock(name: &str) -> Result<File, String> {
-    let directory = crate::paths::portable_database_path("database.db")
-        .map_err(|e| e.to_string())?
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true).write(true).create(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options.share_mode(0);
+    storage::initialize(conn, backup)?;
+    let books: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='EhGalleries')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if books {
+        // 并库后删除/扫描清理与所有账号的本子收藏在同一条 SQL 事务内完成。
+        conn.execute_batch("CREATE TRIGGER IF NOT EXISTS EhGalleries_DeleteAccountFavorite AFTER DELETE ON EhGalleries BEGIN DELETE FROM AccountValues WHERE Kind='favorite-book' AND Item=CAST(OLD.Gid AS TEXT); END;").map_err(|e| e.to_string())?;
     }
-    options
-        .open(directory.join(name))
-        .map_err(|_| "软件或管理终端正在运行，请先关闭另一个窗口".into())
+    Ok(())
+}
+pub fn process_lock() -> Result<process_mutex::ProcessLock, String> {
+    process_mutex::named_lock("application")
 }
 pub fn entry() {
     let admin = std::env::args().any(|arg| arg == "--admin");
@@ -115,6 +111,9 @@ pub fn entry() {
     };
     crate::runtime::run();
 }
+pub(crate) fn report_startup_error(error: &str) {
+    tui::report(error);
+}
 pub fn admin_entry() -> i32 {
     let stdio = std::env::args().any(|arg| arg == "--stdio");
     if !stdio {
@@ -123,7 +122,7 @@ pub fn admin_entry() -> i32 {
     let lock = if stdio {
         process_lock()
     } else {
-        named_lock("admin.lock").map_err(|_| "账号管理窗口已在运行".to_string())
+        process_mutex::named_lock("admin").map_err(|_| "账号管理窗口已在运行".to_string())
     };
     let _lock = match lock {
         Ok(lock) => lock,

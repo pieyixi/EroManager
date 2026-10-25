@@ -169,7 +169,7 @@ pub fn toggle(conn: &Connection, key: i64) -> Result<(), String> {
     Ok(())
 }
 pub fn run() -> Result<(), String> {
-    let db = crate::library::database::init_db();
+    let db = crate::library::database::init_db()?;
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     super::initialize(&mut conn, true)?;
     let admin: i64 = conn

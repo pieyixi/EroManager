@@ -8,20 +8,17 @@ import { useEhLibraryStore } from '../../stores/ehLibrary';
 import { useNavigationStore } from '../../stores/navigation';
 import EhDownloadFailurePopover from './EhDownloadFailurePopover.vue';
 
-const covers = useDetailCoverTargets();
+const props = defineProps<{ source: DownloadSource; active: boolean }>();
 const resultsElement = ref<HTMLElement | null>(null);
-usePageScrollPosition('page-eh-download', resultsElement);
-const props = defineProps<{ source: DownloadSource }>();
+const covers = useDetailCoverTargets(resultsElement);
+usePageScrollPosition('page-eh-download', resultsElement, () => props.active);
 const download = useEhDownloadStore();
 const library = useEhLibraryStore();
 const navigation = useNavigationStore();
 
 const isEh = computed(() => props.source === 'eh');
-const queue = computed(() => isEh.value ? download.ehQueue : download.hitomiQueue);
 const cards = computed(() => download.cards.filter((card) => card.source === props.source));
 const cardCount = computed(() => cards.value.length);
-const activeCount = computed(() => queue.value.filter((job) => job.status === 'downloading').length);
-const waitingCount = computed(() => queue.value.filter((job) => job.status === 'queued').length);
 
 function coverPath(gid: number, saved: string): string {
   return saved || library.galleries.find((gallery) => gallery.gid === gid)?.cover_path || '';
@@ -55,13 +52,6 @@ function deleteHistory(event: MouseEvent, item: EhDownloadHistory): void {
 
 <template>
   <section class="eh-download-lane" :aria-label="isEh ? 'Eh 下载' : 'Hitomi 下载'">
-    <header class="eh-download-lane-head">
-      <div class="eh-download-lane-heading">
-        <h2>{{ isEh ? 'Eh 下载' : 'Hitomi 下载' }}</h2>
-      </div>
-      <span class="eh-download-lane-count">{{ activeCount }} 下载中 · {{ waitingCount }} 等待</span>
-    </header>
-
     <div class="eh-download-lane-form">
       <div class="eh-download-lane-fields">
         <label><span>{{ isEh ? 'GID' : 'ID' }}</span><input v-if="isEh" v-model="download.ehGidInput" class="s-input" type="text" inputmode="numeric" autocomplete="off" @keydown.enter.prevent="add"><input v-else v-model="download.hitomiIdInput" class="s-input" type="text" inputmode="numeric" autocomplete="off" @keydown.enter.prevent="add"></label>

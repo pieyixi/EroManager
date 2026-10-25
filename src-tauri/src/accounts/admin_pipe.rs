@@ -73,7 +73,7 @@ impl Client {
         };
         self.online = false;
         if self.local.is_none() {
-            self.local = Some(crate::library::database::init_db());
+            self.local = Some(crate::library::database::init_db()?);
         }
         let mut conn = self
             .local

@@ -1,4 +1,5 @@
 const {chromium}=require('playwright');const assert=require('node:assert/strict');const path=require('node:path');const os=require('node:os');
+const {visibleFlightImage}=require('./cover-flight-qa.cjs');
 (async()=>{const browser=await chromium.launch();let cases=0;try{
 for(const[width,height]of [[1920,1080],[1366,768],[1280,720]])for(const theme of ['light','dark']){
 const page=await browser.newPage({viewport:{width,height}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(process.env.HAND_QA_URL||'http://127.0.0.1:1422');await page.waitForFunction(()=>{const h=document.getElementById('app')?.__vue_app__?.config.globalProperties.$pinia._s.get('home');return h?.media.current&&h?.book.current&&h.media.phase==='idle'&&h.book.phase==='idle'});
@@ -17,10 +18,10 @@ const flight=page.locator(`.home-detail-flight[data-direction="${direction}"]`);
 const before=await page.locator(selector).first().boundingBox();
 const animations=await page.locator('.home-detail-flight').evaluate(e=>{const a=e.getAnimations({subtree:true});if(a.length!==2)throw new Error('Expected only frame/image motion');return a.map(m=>m.effect.getKeyframes())});assert(animations.every(frames=>frames.every(f=>!('width'in f)&&!('height'in f))));
 await page.locator('.home-detail-flight').evaluate(e=>{for(const a of e.getAnimations({subtree:true})){a.pause();a.currentTime=599}});
-const frame=await page.locator('.home-detail-flight-frame').boundingBox();const image=await page.locator('.home-detail-flight-image').boundingBox();const actualImage=await page.locator(`${selector} img`).first().boundingBox();
+const frame=await page.locator('.home-detail-flight-frame').boundingBox();const image=await visibleFlightImage(page);const actualImage=await page.locator(`${selector} img`).first().boundingBox();
 await page.screenshot({path:path.join(os.tmpdir(),`ero-local-flight-${width}-${theme}-${label}-${direction}.png`)});
 await page.locator('.home-detail-flight').evaluate(e=>e.getAnimations({subtree:true}).forEach(a=>a.play()));await page.locator('.home-detail-flight').waitFor({state:'detached'});await page.waitForTimeout(240);const after=await page.locator(selector).first().boundingBox();for(const key of ['x','y','width','height']){assert(Math.abs(before[key]-after[key])<.03,`Live ${label} ${direction} ${key} shifted`);assert(Math.abs(frame[key]-after[key])<.3,`Frame ${label} ${direction} ${key} missed ${frame[key]} vs ${after[key]}`);assert(Math.abs(image[key]-actualImage[key])<.3,`Image ${label} ${direction} ${key} missed`)}
 }
 }
-console.log(`PASS ${cases} main/hand layouts: no page snapshots; two transform-only layers; image/frame endpoint continuity and correct return origin`);
+console.log(`PASS ${cases} main/hand layouts: no page snapshots; two local layers; transform motion with continuous image crops; stable endpoints and correct return origin`);
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exit(1)});

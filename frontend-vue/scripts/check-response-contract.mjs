@@ -4,6 +4,11 @@ import { resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const repo = resolve(root, '..');
 const pairs = [
+  ['src/api/contracts/av.ts', 'AvVideo', 'src-tauri/src/av/models.rs', 'AvVideo'],
+  ['src/api/contracts/av.ts', 'AvActress', 'src-tauri/src/av/models.rs', 'AvActress'],
+  ['src/api/contracts/av.ts', 'AvWork', 'src-tauri/src/av/models.rs', 'AvWork'],
+  ['src/api/contracts/av.ts', 'AvSettings', 'src-tauri/src/av/models.rs', 'AvSettings'],
+  ['src/api/contracts/av.ts', 'AvFetchResult', 'src-tauri/src/av/models.rs', 'AvFetchResult'],
   ['src/api/contracts/accounts.ts', 'AccountInfo', 'src-tauri/src/accounts/commands.rs', 'AccountInfo'],
   ['src/api/contracts/accounts.ts', 'AccountState', 'src-tauri/src/accounts/commands.rs', 'AccountState'],
   ['src/api/contracts/preferences.ts', 'UserPreferences', 'src-tauri/src/settings.rs', 'UserPreferences'],

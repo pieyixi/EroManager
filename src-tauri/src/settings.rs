@@ -1,8 +1,8 @@
 //! 应用偏好与作品记录分开存储；重置偏好绝不触碰目录、凭据或历史。
 use crate::library::database::Database;
-use rusqlite::{Connection, OptionalExtension};
 #[cfg(test)]
 use rusqlite::params;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -76,7 +76,7 @@ fn validate(p: &UserPreferences) -> Result<(), String> {
                 "name-desc",
             ],
         ),
-        (&p.player_loop, &["off", "one", "all"]),
+        (&p.player_loop, &["off", "one", "all", "random"]),
         (&p.player_fit, &["contain", "fill", "original"]),
         (&p.reader_mode, &["double", "single"]),
         (&p.reader_direction, &["rtl", "ltr"]),
@@ -183,7 +183,8 @@ pub fn get_user_preferences(
     db: tauri::State<Database>,
     session: tauri::State<crate::accounts::Session>,
 ) -> Result<UserPreferences, String> {
-    let key = session.authorize(&scope).ok();
+    let state = session.0.lock().map_err(|e| e.to_string())?;
+    let key = state.authorize(&scope).ok();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let global = read_preferences(&conn)?;
     let mut preferences = if let Some(key) = key {
@@ -205,10 +206,11 @@ pub fn set_user_preferences(
     db: tauri::State<Database>,
     session: tauri::State<crate::accounts::Session>,
 ) -> Result<UserPreferences, String> {
+    let state = session.0.lock().map_err(|e| e.to_string())?;
     let key = if scope.is_empty() {
         None
     } else {
-        Some(session.authorize(&scope)?)
+        Some(state.authorize(&scope)?)
     };
     validate(&preferences)?;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -235,7 +237,8 @@ pub fn get_work_record(
     db: tauri::State<Database>,
     session: tauri::State<crate::accounts::Session>,
 ) -> Result<Option<WorkRecord>, String> {
-    let key = session.authorize(&scope)?;
+    let state = session.0.lock().map_err(|e| e.to_string())?;
+    let key = state.authorize(&scope)?;
     crate::accounts::read_value(
         &*db.conn.lock().map_err(|e| e.to_string())?,
         key,
@@ -252,7 +255,8 @@ pub fn set_work_record(
     db: tauri::State<Database>,
     session: tauri::State<crate::accounts::Session>,
 ) -> Result<(), String> {
-    let key = session.authorize(&scope)?;
+    let state = session.0.lock().map_err(|e| e.to_string())?;
+    let key = state.authorize(&scope)?;
     // 与旧记录使用相同校验，但不再写全局进度表。
     validate_record(&record)?;
     crate::accounts::write_value(
@@ -283,6 +287,15 @@ pub fn get_application_info() -> ApplicationInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn random_playback_mode_is_persistent_and_does_not_change_other_preferences() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE AppSettings(Key TEXT PRIMARY KEY,Value TEXT);").unwrap();
+        let p = UserPreferences { player_loop: "random".into(), ..UserPreferences::default() };
+        write_preferences(&conn, p.clone()).unwrap();
+        assert_eq!(read_preferences(&conn).unwrap(), p);
+        assert!(validate(&UserPreferences { player_loop: "shuffle-episodes".into(), ..p }).is_err());
+    }
     #[test]
     fn concurrency_is_source_specific_bounded_and_additive() {
         let old: UserPreferences = serde_json::from_str(r#"{"theme":"system"}"#).unwrap();

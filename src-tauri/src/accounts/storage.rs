@@ -121,13 +121,16 @@ pub fn initialize(conn: &mut Connection, backup: bool) -> Result<(), String> {
     }
     // 一次性迁移前由 SQLite 生成含 WAL 已提交内容的一致快照，保留原表作为兼容证据。
     if backup {
-        let path = crate::paths::portable_app_dir().join("db").join(format!(
-            "before-accounts-{}.db",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-        ));
+        let directory = crate::paths::portable_backup_dir()
+            .map_err(|e| format!("账号迁移备份目录创建失败：{e}"))?;
+        let timestamp: String = conn
+            .query_row(
+                "SELECT strftime('%Y-%m-%d_%H-%M-%f','now','localtime')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let path = directory.join(format!("账号迁移前_{}.db", timestamp.replace('.', "-")));
         conn.execute("VACUUM INTO ?1", [path.to_string_lossy().as_ref()])
             .map_err(|e| format!("账号迁移前备份失败：{e}"))?;
     }
@@ -172,34 +175,29 @@ pub fn initialize(conn: &mut Connection, backup: bool) -> Result<(), String> {
             )?;
         }
     }
-    let eh_path =
-        crate::paths::portable_database_path("eh-database.db").map_err(|e| e.to_string())?;
-    if eh_path.exists() {
-        let eh = Connection::open_with_flags(eh_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+    // 并库先于账号迁移，旧本子收藏已在同一连接，避免跨库读取或事务自锁。
+    let table: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='EhFavoriteGalleries')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if table {
+        let mut query = tx
+            .prepare("SELECT Gid FROM EhFavoriteGalleries")
             .map_err(|e| e.to_string())?;
-        let table: bool = eh
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='EhFavoriteGalleries')",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if table {
-            let mut query = eh
-                .prepare("SELECT Gid FROM EhFavoriteGalleries")
-                .map_err(|e| e.to_string())?;
-            for row in query
-                .query_map([], |r| r.get::<_, i64>(0))
-                .map_err(|e| e.to_string())?
-            {
-                write_value(
-                    &tx,
-                    2,
-                    "favorite-book",
-                    &row.map_err(|e| e.to_string())?.to_string(),
-                    "true",
-                )?;
-            }
+        for row in query
+            .query_map([], |r| r.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?
+        {
+            write_value(
+                &tx,
+                2,
+                "favorite-book",
+                &row.map_err(|e| e.to_string())?.to_string(),
+                "true",
+            )?;
         }
     }
     tx.commit().map_err(|e| e.to_string())

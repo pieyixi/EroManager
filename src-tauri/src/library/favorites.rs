@@ -49,7 +49,8 @@ pub fn get_favorite_characters(
     db: State<Database>,
     session: State<crate::accounts::Session>,
 ) -> Result<Vec<String>, String> {
-    let key = match session.authorize(&scope) {
+    let state = session.0.lock().map_err(|e| e.to_string())?;
+    let key = match state.authorize(&scope) {
         Ok(key) => key,
         Err(_) => return Ok(vec![]),
     };
@@ -67,7 +68,8 @@ pub fn set_character_favorite(
     db: State<Database>,
     session: State<crate::accounts::Session>,
 ) -> Result<Vec<String>, String> {
-    let key = session.authorize(&scope)?;
+    let state = session.0.lock().map_err(|e| e.to_string())?;
+    let key = state.authorize(&scope)?;
     let name = character_name.trim();
     if name.is_empty() || name.len() > 512 {
         return Err("角色名无效".into());

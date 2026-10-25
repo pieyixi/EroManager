@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia';
 import type { PlayerEpisode } from '../api/contracts/library';
 
-export type PlayerMode = 'detail' | 'archive';
-export type PlayerLoopMode = 'off' | 'one' | 'all';
+export type PlayerMode = 'detail' | 'archive' | 'av';
+export type PlayerLoopMode = 'off' | 'one' | 'all' | 'random';
 export type PlayerFitMode = 'contain' | 'fill' | 'original';
 
 export interface PlayerThumbnailRequest {
@@ -50,6 +50,7 @@ export const usePlayerStore = defineStore('player', {
     messageKind: '',
     messageText: '',
     mode: 'detail' as PlayerMode,
+    sourceKey: '',
     keySeekDirection: 0,
     isSeeking: false,
     pendingSeek: null as { value: number; exact: boolean } | null,

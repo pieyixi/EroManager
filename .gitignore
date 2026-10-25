@@ -16,6 +16,7 @@ Eh_Info/
 AGENTS.md
 HANDOFF.md
 HANDOFF2.md
+HANDOFF*.md
 frontend-vue/node_modules/
 frontend-vue/dist/
 *.db.*
@@ -27,3 +28,5 @@ frontend-vue/dist/
 .env.*
 __pycache__/
 *.pyc
+# One-time private audit against the user's installed databases.
+frontend-vue/scripts/verify-database-consolidation.py

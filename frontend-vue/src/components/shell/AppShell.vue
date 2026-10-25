@@ -14,7 +14,7 @@ const ui = useUiStore();
 onMounted(() => ui.initialize());
 // 控制器保持壳层生命周期，进入播放器时也会清理搜索、下拉框和上下文菜单。
 const browse = useShellBrowseControls();
-const { isBrowsePage, searchExpanded, ehDropdownPosition, closeMediaDropdown } = browse;
+const { isBrowsePage, searchExpanded, ehDropdownPosition, avDropdownPosition, closeMediaDropdown } = browse;
 const { maximized, minimizeWindow, toggleMaximize, closeWindow } = useShellWindowControls();
 const isPlayer = computed(() => navigation.activePage === "page-player");
 const isReader = computed(() => navigation.activePage === "page-eh-reader");
@@ -31,6 +31,7 @@ const pageTitle = computed(
         "page-archive": "建档助手",
         "page-media-library": "里番库",
         "page-eh-library": "本子库",
+        "page-av-library": "AV",
       }) as Record<string, string>
     )[navigation.activePage] || "首页",
 );
@@ -72,5 +73,5 @@ const pageTitle = computed(
     />
   </div>
 
-  <ShellFilterDropdowns :eh-dropdown-position="ehDropdownPosition" />
+  <ShellFilterDropdowns :eh-dropdown-position="ehDropdownPosition" :av-dropdown-position="avDropdownPosition" />
 </template>

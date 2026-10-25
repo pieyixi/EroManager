@@ -30,6 +30,36 @@ fn legacy_data_migrates_once_without_removing_originals() {
         1
     );
 }
+
+#[test]
+fn shared_book_deletion_clears_all_account_favorites_atomically() {
+    let mut conn = fixture();
+    crate::eh::database::initialize_eh_schema(&conn).unwrap();
+    initialize(&mut conn, false).unwrap();
+    storage::create(&conn, "second", "", None).unwrap();
+    conn.execute_batch("INSERT INTO EhGalleries(Gid,Token,Title,Category,ArtistJson,GroupJson,TagsJson,Pages,Posted,CoverPath,FolderPath,SourceId) VALUES(123,'','work',2,'[]','[]','[]',1,'','','folder','123');").unwrap();
+    for key in [2, 3] {
+        storage::favorite(&conn, key, "favorite-book", "123", true).unwrap();
+    }
+    conn.execute_batch("BEGIN; DELETE FROM EhGalleries WHERE Gid=123;")
+        .unwrap();
+    assert!(storage::favorites(&conn, 2, "favorite-book")
+        .unwrap()
+        .is_empty());
+    conn.execute_batch("ROLLBACK;").unwrap();
+    assert_eq!(
+        storage::favorites(&conn, 3, "favorite-book").unwrap(),
+        vec!["123"]
+    );
+    conn.execute("DELETE FROM EhGalleries WHERE Gid=123", [])
+        .unwrap();
+    assert!(storage::favorites(&conn, 2, "favorite-book")
+        .unwrap()
+        .is_empty());
+    assert!(storage::favorites(&conn, 3, "favorite-book")
+        .unwrap()
+        .is_empty());
+}
 #[test]
 fn account_id_changes_preserve_personal_records_and_reject_collisions() {
     let conn = fixture();

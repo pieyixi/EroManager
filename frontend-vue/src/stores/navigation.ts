@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia';
 
-export type PageId = 'page-home' | 'page-media-library' | 'page-eh-library' | 'page-eh-reader' | 'page-detail' | 'page-player' | 'page-settings' | 'page-eh-download' | 'page-unarchived' | 'page-archive';
+export type PageId = 'page-home' | 'page-media-library' | 'page-eh-library' | 'page-av-library' | 'page-eh-reader' | 'page-detail' | 'page-player' | 'page-settings' | 'page-eh-download' | 'page-unarchived' | 'page-archive';
 export type ContextMenuMode = 'home' | 'work' | 'eh-home' | 'eh-work' | 'eh-history';
-export type DetailReturnPage = 'page-home' | 'page-media-library' | 'page-eh-library' | 'page-eh-download';
+export type DetailReturnPage = 'page-home' | 'page-media-library' | 'page-eh-library' | 'page-eh-download' | 'page-av-library';
 
 interface ConfirmationState {
   visible: boolean;
@@ -24,7 +24,7 @@ export const useNavigationStore = defineStore('navigation', {
   state: () => ({
     activePage: 'page-home' as PageId,
     pageRevision: 0,
-    detailSource: 'media' as 'media' | 'eh',
+    detailSource: 'media' as 'media' | 'eh' | 'av',
     detailReturnPage: null as DetailReturnPage | null,
     confirmation: {
       visible: false,
@@ -45,7 +45,7 @@ export const useNavigationStore = defineStore('navigation', {
   getters: {
     // 默认返回所属作品库；首页抽卡可显式指定首页，并贯穿播放/阅读往返。
     backPage(state): PageId {
-      if (state.activePage === 'page-detail') return state.detailReturnPage || (state.detailSource === 'eh' ? 'page-eh-library' : 'page-media-library');
+      if (state.activePage === 'page-detail') return state.detailReturnPage || (state.detailSource === 'av' ? 'page-av-library' : state.detailSource === 'eh' ? 'page-eh-library' : 'page-media-library');
       if (state.activePage === 'page-archive') return 'page-unarchived';
       return 'page-home';
     },

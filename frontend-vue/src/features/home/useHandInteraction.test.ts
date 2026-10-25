@@ -9,7 +9,7 @@ vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(),
 import { useHomeHandStore } from '../../stores/homeHand';
 import { useHandInteraction } from './useHandInteraction';
 
-describe('hand clicks interrupting the end of a carousel step', () => {
+describe('hand interaction', () => {
   let scope: EffectScope;
   let frames: Map<number, FrameRequestCallback>;
   beforeEach(() => {
@@ -22,6 +22,56 @@ describe('hand clicks interrupting the end of a carousel step', () => {
   afterEach(() => {
     lifecycle.unmounted.splice(0).forEach(callback => callback());
     scope.stop(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  });
+
+  it.each([[1, 0, 120], [2, 0, -120], [3, 1, 120], [5, 3, -120]])(
+    'first wheel expands without changing the selected card (%i cards, index %i, delta %i)', (count, initial, deltaY) => {
+      const hand = useHomeHandStore();
+      for (let id = 1; id <= count; id++) hand.add('media', { id, title: `Work ${id}`, cover: '', previews: [] });
+      hand.select(initial);
+      const expanded = ref(false), disabled = ref(false);
+      const interaction = scope.run(() => useHandInteraction({
+        root: ref(null), expanded, active: () => true, disabled: () => disabled.value, open: vi.fn(),
+      }))!;
+      const wheel = { deltaX: 0, deltaY, deltaMode: 0 } as WheelEvent;
+      interaction.wheel(wheel);
+      expect(expanded.value).toBe(true);
+      expect(hand.activeIndex).toBe(initial);
+      expect(interaction.position.value).toBe(initial);
+      expect(interaction.moving.value).toBe(false);
+      expect(frames.size).toBe(0);
+
+      // 实际组件在布局展开到交接完成期间保持 disabled；期间滚动不能积攒成切牌。
+      disabled.value = true;
+      for (let index = 0; index < 10; index++) interaction.wheel(wheel);
+      expect(hand.activeIndex).toBe(initial);
+      expect(frames.size).toBe(0);
+      disabled.value = false;
+      interaction.wheel(wheel);
+      if (count === 1) {
+        expect(frames.size).toBe(0);
+      } else {
+        expect(interaction.moving.value).toBe(true);
+        const [frame, tick] = frames.entries().next().value!;
+        frames.delete(frame); tick(640);
+        const expected = (initial + Math.sign(deltaY) + count) % count;
+        expect(hand.activeIndex).toBe(expected);
+        expect(interaction.moving.value).toBe(false);
+      }
+    });
+
+  it('discards partial wheel input when the interaction is cancelled', () => {
+    const hand = useHomeHandStore();
+    for (let id = 1; id <= 3; id++) hand.add('media', { id, title: `Work ${id}`, cover: '', previews: [] });
+    const interaction = scope.run(() => useHandInteraction({
+      root: ref(null), expanded: ref(true), active: () => true, disabled: () => false, open: vi.fn(),
+    }))!;
+    const wheel = { deltaX: 0, deltaY: 30, deltaMode: 0 } as WheelEvent;
+    interaction.wheel(wheel);
+    interaction.cancel();
+    interaction.wheel(wheel);
+    expect(interaction.moving.value).toBe(false);
+    expect(frames.size).toBe(0);
   });
 
   it.each([[2, 0, 1], [3, 0, 1], [3, 2, 3]])('commits the visible card before opening (%i cards, %i to virtual %i)', (count, initial, target) => {

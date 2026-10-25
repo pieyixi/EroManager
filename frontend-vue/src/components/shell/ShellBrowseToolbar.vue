@@ -2,9 +2,9 @@
 import type { ShellBrowseControls } from '../../features/shell/useShellBrowseControls';
 
 const props = defineProps<{ controls: ShellBrowseControls; pageTitle: string }>();
-const { library, ehLibrary, isMediaLibrary, isEh, isBrowsePage, ehFilterLabels,
+const { library, ehLibrary, avLibrary, isMediaLibrary, isEh, isAv, isBrowsePage, ehFilterLabels, avFilterLabels,
   bindSearchElement, bindSearchContainer, searchExpanded, shellSearch, showShellClear,
-  openFilter, openEhFilter, clearSearch, expandSearch, collapseSearch } = props.controls;
+  openFilter, openEhFilter, openAvFilter, toggleAvMode, clearSearch, expandSearch, collapseSearch } = props.controls;
 </script>
 
 <template>
@@ -107,6 +107,24 @@ const { library, ehLibrary, isMediaLibrary, isEh, isBrowsePage, ehFilterLabels,
         }}</span>
       </button>
     </template>
+    <template v-else-if="isAv">
+      <button class="top-filter-tab av-view-toggle" type="button" aria-label="切换番号／女优显示"
+        :aria-pressed="avLibrary.mode === 'actress'" :title="avLibrary.mode === 'code' ? '切换为女优照片' : '切换为番号封面'"
+        @click="toggleAvMode">
+        {{ avLibrary.mode === 'code' ? '番号' : '女优' }}
+        <svg class="av-mode-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h10l-2.5-2.5M13 11H3l2.5 2.5"/></svg>
+      </button>
+      <button v-for="(label, key) in avFilterLabels" :key="key" class="top-filter-tab"
+        :class="{ active: avLibrary.isFilterActive(key) }" @click="openAvFilter(key, $event)">
+        {{ key === 'year' ? '年份' : label }}<span class="top-filter-arrow">⌄</span>
+      </button>
+      <button class="top-sort-btn" :class="{ active: avLibrary.currentSort.startsWith('time') }" title="切换时间顺序" @click="avLibrary.toggleTimeSort">
+        时间<span class="fluent-icon">{{ avLibrary.currentSort === 'time-desc' ? '\uE74A' : '\uE74B' }}</span>
+      </button>
+      <button class="top-sort-btn" :class="{ active: avLibrary.currentSort.startsWith('name') }" title="切换名称顺序" @click="avLibrary.toggleNameSort">
+        名称<span class="fluent-icon">{{ avLibrary.currentSort === 'name-desc' ? '\uE74A' : '\uE74B' }}</span>
+      </button>
+    </template>
     <template v-else>
       <span class="titlebar-page-name">{{ pageTitle }}</span>
     </template>
@@ -114,9 +132,9 @@ const { library, ehLibrary, isMediaLibrary, isEh, isBrowsePage, ehFilterLabels,
 
   <span v-if="isBrowsePage" class="titlebar-result-count" id="resultCount"
     >{{
-      isEh ? ehLibrary.filteredGalleries.length : library.filteredWorks.length
+      isAv ? avLibrary.totalCount : isEh ? ehLibrary.filteredGalleries.length : library.filteredWorks.length
     }}
-    部</span
+    {{ isAv && avLibrary.mode === 'actress' ? '人' : '部' }}</span
   >
   <button
     v-if="isBrowsePage && searchExpanded"
@@ -138,7 +156,7 @@ const { library, ehLibrary, isMediaLibrary, isEh, isBrowsePage, ehFilterLabels,
       v-model="shellSearch"
       type="text"
       :placeholder="
-        isEh
+        isAv ? '搜索番号、女优、片商、系列、Tag' : isEh
           ? '搜索标题、画师、社团、Tag'
           : '搜索标题、别名、简介、制作商、Tag'
       "
@@ -156,7 +174,7 @@ const { library, ehLibrary, isMediaLibrary, isEh, isBrowsePage, ehFilterLabels,
       清除
     </button>
     <button
-      v-if="isBrowsePage"
+      v-if="isBrowsePage && !isAv"
       class="titlebar-favorite fluent-icon"
       :class="{ active: isEh ? ehLibrary.favoriteMode : library.favoriteCharacterMode }"
       :disabled="isEh ? !ehLibrary.favoriteGids.length : !library.favoriteCharacters.length"
@@ -172,3 +190,8 @@ const { library, ehLibrary, isMediaLibrary, isEh, isBrowsePage, ehFilterLabels,
     <span class="titlebar-search-icon fluent-icon">&#xE721;</span>
   </div>
 </template>
+
+<style scoped>
+.av-view-toggle { display: inline-flex; align-items: center; gap: 7px; min-width: 80px; }
+.av-mode-icon { color: var(--soft); }
+</style>

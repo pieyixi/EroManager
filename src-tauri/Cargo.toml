@@ -1,6 +1,6 @@
 [package]
 name = "ero-manager"
-version = "5.3.0"
+version = "6.0.0"
 edition = "2021"
 default-run = "ero-manager"
 
@@ -29,7 +29,7 @@ tauri-plugin-libmpv = "0.3.2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
 base64 = "0.22"
 ring = "0.17.14"
 open = "5"
@@ -44,6 +44,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_IO",
+    "Win32_System_Threading",
     "Win32_System_Pipes",
     "Win32_System_Console",
     "Win32_System_StationsAndDesktops",

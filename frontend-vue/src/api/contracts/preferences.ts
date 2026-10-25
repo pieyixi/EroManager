@@ -3,7 +3,7 @@ export interface UserPreferences {
   startup_page: 'home' | 'media-library' | 'eh-library';
   media_sort: 'time-desc' | 'time-asc' | 'name-asc' | 'name-desc';
   book_sort: 'added-desc' | 'added-asc' | 'time-desc' | 'time-asc' | 'name-asc' | 'name-desc';
-  player_loop: 'off' | 'one' | 'all';
+  player_loop: 'off' | 'one' | 'all' | 'random';
   player_auto_next: boolean;
   player_volume: number;
   player_speed: number;

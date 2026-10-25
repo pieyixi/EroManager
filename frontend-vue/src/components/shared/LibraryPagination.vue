@@ -6,6 +6,7 @@ const props = defineProps<{
   currentPage: number;
   totalPages: number;
   total: number;
+  unit?: string;
   jumpInputId?: string;
 }>();
 const emit = defineEmits<{ change: [page: number] }>();
@@ -28,7 +29,7 @@ function change(page: number): void {
     </template>
     <button class="page-btn" aria-label="下一页" :disabled="currentPage >= totalPages" @click="change(currentPage + 1)">&#8250;</button>
     <input :id="jumpInputId" v-model.number="pageJump" class="page-jump" aria-label="跳转页码" type="number" min="1" :max="totalPages" @keydown.enter="change(pageJump)">
-    <span class="page-total">共 {{ total }} 部</span>
+    <span class="page-total">共 {{ total }} {{ unit || '部' }}</span>
   </div>
 </template>
 

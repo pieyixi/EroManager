@@ -1,6 +1,6 @@
 # Frontend Architecture
 
-Product identity: **裏界箱庭** (display name), **ero-manager** (project and executable), **ero_manager_lib** (Rust library artifact). Existing workspace/portable directories, `com.hanime.manager` storage identity, `.hanime-library.json` marker, historical AppData discovery path and backup-format identifiers are compatibility contracts, not visible branding. Keep them stable to preserve settings, histories and existing libraries. The `hanime_url` field describes source metadata and is not a product name.
+Product identity: **裏界箱庭** (display name), **ero-manager** (project and executable), **ero_manager_lib** (Rust library artifact). Preserve the `com.hanime.manager` storage identity, `.hanime-library.json` marker and backup-format identifiers. Runtime storage is one `<exe-directory>/db/database.db`; root/AppData database discovery has been removed and must not be restored. Legacy split-book storage is read only by the guarded one-time consolidation migration. The `hanime_url` field describes source metadata and is not a product name.
 
 The active frontend is Vue 3 + TypeScript. Directory ownership follows existing responsibilities; this structure does not change routes, command names, DTOs, databases, portable paths, or product behavior.
 
@@ -58,13 +58,14 @@ Pages compose business components. Business components stay with their actual do
 
 - `navigation`: routes, return origins, confirmation and context menus.
 - `library` / `ehLibrary`: independent browsing filters, sorting, pagination and details.
-- Book favorites belong to `ehLibrary` and `eh/favorites.rs`, through typed `ehApi` commands. Detail identity buttons reuse character-favorite styling, while the book toolbar star filters signed gallery IDs. The additive SQLite table preserves favorites across restarts and rescans, separates same-number sources, and removes entries when their gallery records are deleted. Category/language metadata and home random pools remain unchanged.
+- Book favorites belong to `ehLibrary` and `eh/favorites.rs`, through typed `ehApi` commands. Detail identity buttons reuse character-favorite styling, while the book toolbar star filters signed gallery IDs. Current per-account favorites live in `AccountValues` (`favorite-book`); `EhFavoriteGalleries` remains for migration compatibility. Same-number sources stay distinct, and a gallery deletion transaction clears every account's matching favorite. Category/language metadata and home random pools remain independent.
 - `home` / `homeHand`: independent no-replacement draws and process-local hand entries.
 - `archive` / `libraryConsole`: authoring, binding, scans, imports and maintenance.
 - `ehSettings`: binding, credentials, scan state and dashboard only.
-- `ehDownload`: source inputs, independent Eh/Hitomi FIFO workers, process-local credentials, retries and credential-free history. Both sources may download one work simultaneously (three image transfers per work); aggregate activity stays true until both are idle. Per-source progress uses signed identities, and overlapping completion events coalesce serialized shared-library refreshes. Card stack order is independent of execution order.
+- `ehDownload`: source inputs, independent Eh/Hitomi FIFO workers, process-local credentials, retries and credential-free history. Both sources may download one work simultaneously; each source snapshots its persistent image concurrency (1–5, default 3) when a work/retry starts. Aggregate activity stays true until both are idle. Per-source progress uses signed identities, and overlapping completion events coalesce serialized shared-library refreshes. Card stack order is independent of execution order.
 - `ehReader`: reading state; presentation and local UI geometry stay outside the store.
 - `player`: playback state coordinated by the existing player feature modules.
+- `accounts` / `profile`: local account and avatar state; account controllers coordinate switching, locking and scoped personal writes. Rust owns PIN validation, authorization and persistence. Profile preferences, favorites, progress and draw history use the immutable account key in the unified database; UI geometry stays outside these stores.
 
 Keep the cohesive home gestures, draw stages, carousel, hold/removal and reader presentation state machines intact. File length alone is not a reason to split them. This cleanup relocates their rendering components without changing those state machines.
 

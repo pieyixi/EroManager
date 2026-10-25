@@ -7,7 +7,13 @@ mod tray;
 mod window_bounds;
 
 pub fn run() {
-    let db = init_db();
+    let db = match init_db() {
+        Ok(db) => db,
+        Err(error) => {
+            crate::accounts::report_startup_error(&error);
+            return;
+        }
+    };
     let session = {
         let mut conn = db.conn.lock().expect("database lock");
         crate::accounts::initialize(&mut conn, true)
@@ -43,6 +49,13 @@ pub fn run() {
         // 包括等待共享数据库锁与结果序列化；不能让它们占用原生窗口消息线程。
         .invoke_handler(tauri::generate_handler![
             crate::accounts::account_state,
+            crate::av::av_list_works,
+            crate::av::av_get_settings,
+            crate::av::av_bind_root,
+            crate::av::av_fetch_work,
+            crate::av::av_add_magnet,
+            crate::av::av_remove_magnet,
+            crate::av::av_get_local_videos,
             crate::accounts::account_auth,
             crate::accounts::account_lock,
             crate::accounts::account_logout,

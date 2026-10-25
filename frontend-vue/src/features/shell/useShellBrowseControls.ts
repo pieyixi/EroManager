@@ -2,16 +2,19 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { type DropdownPosition, type FilterKey, useLibraryStore } from '../../stores/library';
 import { type EhFilterKey, useEhLibraryStore } from '../../stores/ehLibrary';
 import { useNavigationStore } from '../../stores/navigation';
+import { avFilterLabels, type AvFilterKey, useAvLibraryStore } from '../../stores/avLibrary';
 
 /** 壳层搜索、筛选与外点收起的完整交互；DOM 测量留在 UI 层，不进入 Store。 */
 export function useShellBrowseControls() {
   const navigation = useNavigationStore();
   const library = useLibraryStore();
   const ehLibrary = useEhLibraryStore();
+  const avLibrary = useAvLibraryStore();
   const searchElement = ref<HTMLInputElement | null>(null);
   const searchContainer = ref<HTMLElement | null>(null);
   const searchExpanded = ref(false);
   const ehDropdownPosition = ref({ top: 0, left: 0, width: 310 });
+  const avDropdownPosition = ref({ top: 0, left: 0, width: 310 });
   const ehFilterLabels: Record<EhFilterKey, string> = {
     category: "分类",
     artist: "画师",
@@ -20,12 +23,16 @@ export function useShellBrowseControls() {
   };
   const isMediaLibrary = computed(() => navigation.activePage === "page-media-library");
   const isEh = computed(() => navigation.activePage === "page-eh-library");
-  const isBrowsePage = computed(() => isMediaLibrary.value || isEh.value);
+  const isAv = computed(() => navigation.activePage === 'page-av-library');
+  const isBrowsePage = computed(() => isMediaLibrary.value || isEh.value || isAv.value);
 
   const shellSearch = computed({
-    get: () => (isEh.value ? ehLibrary.search : library.search),
+    get: () => (isAv.value ? avLibrary.search : isEh.value ? ehLibrary.search : library.search),
     set: (value: string) => {
-      if (isEh.value) {
+      if (isAv.value) {
+        avLibrary.search = value;
+        avLibrary.resetPages();
+      } else if (isEh.value) {
         ehLibrary.search = value;
         ehLibrary.currentPage = 1;
       } else {
@@ -35,7 +42,7 @@ export function useShellBrowseControls() {
     },
   });
   const showShellClear = computed(() =>
-    isEh.value ? ehLibrary.showClearButton : library.showClearButton,
+    isAv.value ? avLibrary.showClearButton : isEh.value ? ehLibrary.showClearButton : library.showClearButton,
   );
 
   function openFilter(key: FilterKey, event: MouseEvent): void {
@@ -52,7 +59,8 @@ export function useShellBrowseControls() {
   }
 
   function clearSearch(): void {
-    if (isEh.value) ehLibrary.clearSearchAndFilters();
+    if (isAv.value) avLibrary.clearSearchAndFilters();
+    else if (isEh.value) ehLibrary.clearSearchAndFilters();
     else library.clearSearchAndFilters();
   }
 
@@ -75,6 +83,7 @@ export function useShellBrowseControls() {
     searchExpanded.value = true;
     library.closeDropdown();
     ehLibrary.closeDropdown();
+    avLibrary.closeDropdown();
   }
 
   function collapseSearch(): void {
@@ -86,6 +95,23 @@ export function useShellBrowseControls() {
   function handleDocumentClick(): void {
     library.closeDropdown();
     ehLibrary.closeDropdown();
+    avLibrary.closeDropdown();
+  }
+
+  function openAvFilter(key: AvFilterKey, event: MouseEvent): void {
+    event.stopPropagation();
+    collapseSearch();
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const width = Math.min(key === 'tag' ? 390 : 310, window.innerWidth - 84);
+    const left = Math.max(72 + width / 2, Math.min(window.innerWidth - 8 - width / 2, rect.left + rect.width / 2));
+    avDropdownPosition.value = { top: rect.bottom + 8, left, width };
+    avLibrary.toggleDropdown(key);
+  }
+
+  function toggleAvMode(event: MouseEvent): void {
+    event.stopPropagation();
+    collapseSearch();
+    avLibrary.toggleMode();
   }
 
   function handleDocumentPointerDown(event: PointerEvent): void {
@@ -96,30 +122,37 @@ export function useShellBrowseControls() {
       collapseSearch();
   }
 
+  function handleDocumentKeyDown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') handleDocumentClick();
+  }
+
   watch(
     () => navigation.activePage,
     () => {
       collapseSearch();
       library.closeDropdown();
       ehLibrary.closeDropdown();
+      avLibrary.closeDropdown();
       navigation.closeContextMenu();
     },
   );
   onMounted(() => {
     document.addEventListener('click', handleDocumentClick);
     document.addEventListener('pointerdown', handleDocumentPointerDown, true);
+    document.addEventListener('keydown', handleDocumentKeyDown);
   });
   onBeforeUnmount(() => {
     document.removeEventListener('click', handleDocumentClick);
     document.removeEventListener('pointerdown', handleDocumentPointerDown, true);
+    document.removeEventListener('keydown', handleDocumentKeyDown);
   });
   return {
-    library, ehLibrary, isMediaLibrary, isEh, isBrowsePage, ehFilterLabels,
+    library, ehLibrary, avLibrary, isMediaLibrary, isEh, isAv, isBrowsePage, ehFilterLabels, avFilterLabels,
     bindSearchElement: (element: unknown) => { searchElement.value = element as HTMLInputElement | null; },
     bindSearchContainer: (element: unknown) => { searchContainer.value = element as HTMLElement | null; },
-    searchExpanded, ehDropdownPosition, shellSearch, showShellClear,
-    openFilter, openEhFilter, clearSearch, expandSearch, collapseSearch,
-    closeMediaDropdown: () => library.closeDropdown(),
+    searchExpanded, ehDropdownPosition, avDropdownPosition, shellSearch, showShellClear,
+    openFilter, openEhFilter, openAvFilter, toggleAvMode, clearSearch, expandSearch, collapseSearch,
+    closeMediaDropdown: handleDocumentClick,
   };
 }
 export type ShellBrowseControls = ReturnType<typeof useShellBrowseControls>;

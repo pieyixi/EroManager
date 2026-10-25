@@ -43,6 +43,7 @@ export function useHandInteraction(options: {
   }
   function cancel(): void {
     release();
+    wheelSum = 0; lastWheel = 0; lastStep = -Infinity;
     clearTimeout(liftTimer);
     const discarded = lifted.value?.phase === 'throwing' ? lifted.value.card.key : null;
     readyKey.value = null;
@@ -173,12 +174,20 @@ export function useHandInteraction(options: {
   }
   function lostCapture(): void { if (gesture) cancel(); }
   function wheel(event: WheelEvent): void {
-    if (hand.cards.length < 2 || options.disabled() || lifted.value || gesture) return;
+    if (!options.active() || !hand.cards.length || options.disabled() || lifted.value || gesture) return;
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (!delta) return;
+    // 首次滚动只展开当前牌；展开期间由布局动效的 changing 状态禁用交互，不叠加切牌。
+    if (!options.expanded.value) {
+      wheelSum = 0; lastWheel = 0; lastStep = -Infinity;
+      expandAt(hand.activeIndex);
+      return;
+    }
+    if (hand.cards.length < 2) return;
     const now = performance.now();
     if (now - lastWheel > 180) wheelSum = 0;
     lastWheel = now;
     if (now - lastStep < 280) return;
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
     wheelSum += delta * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 240 : 1);
     if (Math.abs(wheelSum) < 45) return;
     step(wheelSum > 0 ? 1 : -1);

@@ -6,6 +6,7 @@ import { computed } from 'vue';
 import { useNavigationStore } from '../../stores/navigation';
 import { useLibraryStore } from '../../stores/library';
 import { useEhLibraryStore } from '../../stores/ehLibrary';
+import { useAvLibraryStore } from '../../stores/avLibrary';
 import { useArchiveStore } from '../../stores/archive';
 import { useLibraryConsoleStore } from '../../stores/libraryConsole';
 import { useUiStore } from '../../stores/ui';
@@ -16,6 +17,7 @@ const home = useHomeStore();
 const hand = useHomeHandStore();
 const library = useLibraryStore();
 const ehLibrary = useEhLibraryStore();
+const avLibrary = useAvLibraryStore();
 const archive = useArchiveStore();
 const settings = useLibraryConsoleStore();
 const ui = useUiStore();
@@ -49,8 +51,8 @@ function goBack(): void {
   if (returnToHome()) return;
   if (navigation.activePage === 'page-detail') {
     const remembered = detailReturnOrigin.value;
-    const source = navigation.detailSource === 'eh' ? 'book' : 'media';
-    const id = source === 'book' ? ehLibrary.currentGallery?.gid : library.currentDetailWorkId;
+    const source = navigation.detailSource === 'av' ? 'av' : navigation.detailSource === 'eh' ? 'book' : 'media';
+    const id = source === 'av' ? avLibrary.currentWork?.code : source === 'book' ? ehLibrary.currentGallery?.gid : library.currentDetailWorkId;
     if (remembered?.source === source && remembered.id === id && detailOriginPage(remembered.origin) === navigation.backPage) {
       const destination = navigation.backPage;
       void returnCoverDetail(remembered.origin, () => navigation.showPage(destination));
@@ -98,6 +100,18 @@ function toggleTheme(event: MouseEvent): void {
       >
         <span class="fluent-icon sidebar-icon">&#xE82D;</span
         ><span class="sidebar-label">本子</span>
+      </button>
+      <button
+        class="sidebar-item"
+        :class="{ active: navigation.activePage === 'page-av-library' }"
+        aria-label="AV"
+        @click="navigation.showPage('page-av-library')"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="sidebar-icon" width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2.5" y="5.5" width="13.5" height="13" rx="3" />
+          <path d="m16 10 4.3-2.45a.8.8 0 0 1 1.2.7v7.5a.8.8 0 0 1-1.2.7L16 14" />
+        </svg>
+        <span class="sidebar-label">AV</span>
       </button>
     </div>
     <div class="sidebar-secondary">

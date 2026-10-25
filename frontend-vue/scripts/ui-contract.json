@@ -5,9 +5,9 @@
     "btnOpenFolder", "captureEpisodeBtn", "confirmBody", "confirmModal", "confirmTitle", "consoleProgress",
     "consoleProgressBar", "consoleProgressText", "consoleScanButton", "coverGrid",
     "ctxDeleteWork", "ctxRefreshEh", "ctxRefreshHome", "dbFilePath", "dbMsg", "detailCover", "detailDesc", "detailTags",
-    "detailTitle", "episodeList", "filterDropdown", "filterRow", "fitModeBtn", "fullscreenBtn", "jsonPasteMsg",
+    "detailTitle", "download-panel-eh", "download-panel-hitomi", "download-panel-javdb", "episodeList", "filterDropdown", "filterRow", "fitModeBtn", "fullscreenBtn", "jsonPasteMsg",
     "libraryMsg", "mediaPath", "metricArchived", "metricEpisodes", "metricProgress", "metricSize",
-    "metricTotalWorks", "metricUnarchived", "mpvHint", "mpvStage", "muteBtn", "page-archive", "page-detail", "pageJump",
+    "metricTotalWorks", "metricUnarchived", "mpvHint", "mpvStage", "muteBtn", "page-archive", "page-av-library", "page-detail", "pageJump",
     "page-eh-download", "page-eh-library", "page-eh-reader", "page-home", "page-media-library", "page-player", "page-settings", "page-unarchived", "pagination", "playerDescriptionBlock",
     "playerBackplate", "playerDescriptionToggle", "playerDuration", "playerMsg", "playerNextBtn",
     "playerOtherCount", "playerOtherEpisodes", "playerPlayBtn",
@@ -17,5 +17,5 @@
     "searchClear", "searchInput", "sortNameBtn", "sortTimeBtn", "unarchivedCount", "unarchivedIndex",
     "unarchivedList", "unarchivedPath", "workContextMenu"
   ],
-  "pages": ["page-home", "page-media-library", "page-eh-library", "page-eh-reader", "page-detail", "page-player", "page-settings", "page-eh-download", "page-unarchived", "page-archive"]
+  "pages": ["page-home", "page-media-library", "page-eh-library", "page-av-library", "page-eh-reader", "page-detail", "page-player", "page-settings", "page-eh-download", "page-unarchived", "page-archive"]
 }
